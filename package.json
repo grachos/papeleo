@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Plataforma de papeleo por WhatsApp: módulo de gastos",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "tsx watch --env-file=.env src/server.ts",
