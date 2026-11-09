@@ -30,31 +30,31 @@ export class SupabaseStore implements StorePort {
     name: string | null,
   ): Promise<{ member: Member; org: Org; isNew: boolean }> {
     const found = await this.db
-      .from("members")
-      .select("id, org_id, phone, name, organizations(id, name, sheet_id)")
+      .from("papeleo_members")
+      .select("id, org_id, phone, name, organization:papeleo_organizations(id, name, sheet_id)")
       .eq("phone", phone)
       .maybeSingle();
     if (found.error) throw found.error;
     if (found.data) {
-      const { organizations, ...member } = found.data as any;
-      return { member: member as Member, org: organizations as Org, isNew: false };
+      const { organization, ...member } = found.data as any;
+      return { member: member as Member, org: organization as Org, isNew: false };
     }
 
     // Número desconocido: se le crea su propia organización (registro autoservicio).
     const org = await this.db
-      .from("organizations")
+      .from("papeleo_organizations")
       .insert({ name: name ?? phone })
       .select("id, name, sheet_id")
       .single();
     if (org.error) throw org.error;
 
     const member = await this.db
-      .from("members")
+      .from("papeleo_members")
       .insert({ org_id: org.data.id, phone, name })
       .select("id, org_id, phone, name")
       .single();
     if (member.error) {
-      await this.db.from("organizations").delete().eq("id", org.data.id);
+      await this.db.from("papeleo_organizations").delete().eq("id", org.data.id);
       // Dos mensajes simultáneos del mismo número nuevo: el otro ganó, se reutiliza.
       if (member.error.code === "23505") return this.findOrCreateMember(phone, name);
       throw member.error;
@@ -64,7 +64,7 @@ export class SupabaseStore implements StorePort {
 
   async claimDocument(orgId: string, memberId: string, waMessageId: string, mime: string) {
     const res = await this.db
-      .from("documents")
+      .from("papeleo_documents")
       .insert({ org_id: orgId, member_id: memberId, wa_message_id: waMessageId, mime_type: mime })
       .select("id")
       .single();
@@ -75,7 +75,7 @@ export class SupabaseStore implements StorePort {
 
   async hashExists(orgId: string, sha256: string) {
     const res = await this.db
-      .from("documents")
+      .from("papeleo_documents")
       .select("id")
       .eq("org_id", orgId)
       .eq("sha256", sha256)
@@ -89,13 +89,13 @@ export class SupabaseStore implements StorePort {
     const path = `${orgId}/${new Date().toISOString().slice(0, 7)}/${documentId}.${EXT[mime] ?? "bin"}`;
     const up = await this.db.storage.from(this.bucket).upload(path, data, { contentType: mime });
     if (up.error) throw up.error;
-    const res = await this.db.from("documents").update({ storage_path: path, sha256 }).eq("id", documentId);
+    const res = await this.db.from("papeleo_documents").update({ storage_path: path, sha256 }).eq("id", documentId);
     if (res.error) throw res.error;
   }
 
   async finishDocument(documentId: string, status: string, extraction?: Extraction) {
     const res = await this.db
-      .from("documents")
+      .from("papeleo_documents")
       .update({ status, extraction: extraction ?? null, doc_type: extraction?.tipo ?? null })
       .eq("id", documentId);
     if (res.error) throw res.error;
@@ -103,7 +103,7 @@ export class SupabaseStore implements StorePort {
 
   async saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense) {
     const res = await this.db
-      .from("expenses")
+      .from("papeleo_expenses")
       .insert({ ...expense, org_id: orgId, member_id: memberId, document_id: documentId })
       .select(EXPENSE_COLUMNS)
       .single();
@@ -115,7 +115,7 @@ export class SupabaseStore implements StorePort {
     let target = expenseId;
     if (!target) {
       const last = await this.db
-        .from("expenses")
+        .from("papeleo_expenses")
         .select("id")
         .eq("member_id", memberId)
         .eq("estado", "registrado")
@@ -127,7 +127,7 @@ export class SupabaseStore implements StorePort {
     }
     // El filtro por member_id impide descartar gastos de otra persona con un id ajeno.
     const res = await this.db
-      .from("expenses")
+      .from("papeleo_expenses")
       .update({ estado: "descartado" })
       .eq("id", target)
       .eq("member_id", memberId)
@@ -140,7 +140,7 @@ export class SupabaseStore implements StorePort {
 
   async listExpenses(orgId: string, from: string, to: string) {
     const res = await this.db
-      .from("expenses")
+      .from("papeleo_expenses")
       .select(EXPENSE_COLUMNS)
       .eq("org_id", orgId)
       .eq("estado", "registrado")
@@ -151,7 +151,7 @@ export class SupabaseStore implements StorePort {
   }
 
   async setSheet(orgId: string, sheetId: string) {
-    const res = await this.db.from("organizations").update({ sheet_id: sheetId }).eq("id", orgId);
+    const res = await this.db.from("papeleo_organizations").update({ sheet_id: sheetId }).eq("id", orgId);
     if (res.error) throw res.error;
   }
 }

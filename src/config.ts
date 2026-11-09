@@ -17,7 +17,7 @@ export function loadConfig() {
     supabase: {
       url: required("SUPABASE_URL"),
       serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
-      bucket: process.env.SUPABASE_BUCKET ?? "documentos",
+      bucket: process.env.SUPABASE_BUCKET ?? "papeleo-documentos",
     },
     extractionModel: process.env.EXTRACTION_MODEL ?? "claude-opus-5-5",
     googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || null,
