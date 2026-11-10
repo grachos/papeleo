@@ -34,6 +34,16 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 - Nunca escribir secretos (tokens, service role, JSON de cuenta de servicio) en el repo, en commits ni en variables de entorno vía herramientas. Se cargan en el panel de Render; el usuario los pone.
 - `SUPABASE_SERVICE_ROLE_KEY` solo en el servidor.
 
+## Relevo de sesión (2026-11-10, noche)
+
+El usuario se fue a descansar. **Mientras no responda, no se hacen acciones externas que requieren su visto bueno:** no aplicar migraciones, no fusionar PR, no cambiar variables de Render ni lanzar despliegues. Sí se puede revisar logs y datos (solo lectura) y preparar trabajo en local. Estado y pendientes detallados: README «Punto de partida para la próxima sesión».
+
+Lecciones operativas de esta sesión:
+- Render **no despliega solo** al fusionar a `main`: lanzar un despliegue (con aprobación) y verificar logs. Cambiar una variable por la API de Render sí dispara un despliegue.
+- Si alguna variable `WHATSAPP_*` está definida en Render, el código exige las cuatro; con solo Telegram deben estar todas borradas. `ADMIN_PASSWORD` exige 12 caracteres o más.
+- Tras fusionar un PR, la rama de trabajo se reinicia desde `main` y su siguiente push es forzado: **requiere permiso explícito del usuario cada vez** (el sistema lo bloquea hasta entonces). Dejar el commit en local y pedirlo.
+- Siempre aplicar la migración a Supabase **antes** de fusionar/desplegar código que dependa de ella, y verificar con una transacción cancelada (sin dejar datos).
+
 ## Hoja de ruta (orden acordado)
 
 0. ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10). **`0006_extraction_usage.sql` (consumo de la lectura) escrita, pendiente de aplicar.**
