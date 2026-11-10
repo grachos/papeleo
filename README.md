@@ -12,7 +12,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
-| Consumo (tokens) de cada lectura de factura | ✅ En código; **falta aplicar la migración `0006`** (ver «Costo real de leer facturas») |
+| Consumo (tokens) de cada lectura de factura | ✅ En vivo desde el 2026-11-10 (migración `0006` aplicada); aún sin datos hasta que se lea la próxima factura (ver «Costo real de leer facturas») |
 | Comandos `resumen`, `borrar`, `hoja` | ✅ Hecho |
 | Copia opcional de cada gasto a Google Sheets | ✅ Hecho |
 | Guardar el detalle por concepto de cada factura | ⏳ Pendiente (hoy solo hay un `descripcion` por factura) |
@@ -100,7 +100,7 @@ Solo entra quien canjea un **código de acceso** creado por el administrador. Qu
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; **pendiente de aplicar**). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
