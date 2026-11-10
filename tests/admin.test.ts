@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAdminRouter } from "../src/admin.js";
 import type { AdminPort } from "../src/types.js";
 
-const PASSWORD = `test-${randomBytes(8).toString("hex")}`; // generada en cada corrida: no hay contraseñas escritas en el código
+const CLAVE_ADMIN = randomBytes(12).toString("hex"); // distinta en cada corrida
 const ID = "0b3c5c52-7a0e-4b51-9c61-3a2f6f1e9a10";
 
 let server: Server | null = null;
@@ -22,7 +22,7 @@ function start(store: Partial<AdminPort> = {}) {
     ...store,
   };
   const app = express();
-  app.use(createAdminRouter({ store: full, password: PASSWORD, botUsername: () => "papeleo_bot" }));
+  app.use(createAdminRouter({ store: full, password: CLAVE_ADMIN, botUsername: () => "papeleo_bot" }));
   app.get("/otra", (_req, res) => void res.send("ok"));
   return new Promise<{ base: string; store: AdminPort }>((resolve) => {
     server = app.listen(0, () => resolve({ base: `http://127.0.0.1:${(server!.address() as any).port}`, store: full }));
@@ -37,7 +37,7 @@ const form = (data: Record<string, string>) => ({
 });
 
 async function login(base: string) {
-  const res = await fetch(`${base}/admin/login`, form({ password: PASSWORD }));
+  const res = await fetch(`${base}/admin/login`, form({ password: CLAVE_ADMIN }));
   const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0];
   const page = await (await fetch(`${base}/admin`, { headers: { cookie } })).text();
   const csrf = page.match(/name="csrf" value="([0-9a-f]+)"/)?.[1] ?? "";
@@ -59,7 +59,7 @@ describe("panel de administración", () => {
   it("rechaza la contraseña incorrecta y bloquea tras 5 intentos", async () => {
     const { base } = await start();
     for (let i = 0; i < 5; i++) expect((await fetch(`${base}/admin/login`, form({ password: "mala" }))).status).toBe(401);
-    expect((await fetch(`${base}/admin/login`, form({ password: PASSWORD }))).status).toBe(429);
+    expect((await fetch(`${base}/admin/login`, form({ password: CLAVE_ADMIN }))).status).toBe(429);
   });
 
   it("con la contraseña correcta abre una sesión HttpOnly y SameSite=Strict", async () => {
