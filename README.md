@@ -12,6 +12,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
+| Consumo (tokens) de cada lectura de factura | ✅ En código; **falta aplicar la migración `0006`** (ver «Costo real de leer facturas») |
 | Comandos `resumen`, `borrar`, `hoja` | ✅ Hecho |
 | Copia opcional de cada gasto a Google Sheets | ✅ Hecho |
 | Guardar el detalle por concepto de cada factura | ⏳ Pendiente (hoy solo hay un `descripcion` por factura) |
@@ -19,7 +20,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Consultas libres en lenguaje natural (capa 1: `resumir_gastos`, `listar_gastos`, `detalle_gasto`) | ✅ Hecho en código, con 13 pruebas del SQL contra Postgres real; migración `0004` **aplicada y verificada el 2026-11-10** en `real-samaria`; falta probarlo con datos reales |
 | Envío de archivos por el chat (`enviar_archivos`) | ⏳ Pendiente: va después de Google Drive |
 | Base de conocimiento: el sistema aprende de las preguntas | ⏳ Pendiente (diseño en «Base de conocimiento») |
-| Despliegue en Render | ⚠️ Servicio creado, `main` ya tiene el código nuevo, pero **faltan las variables de entorno** (ver «Dónde conseguir cada dato») |
+| Despliegue en Render | ✅ En vivo desde el 2026-11-10 (canal Telegram). Primera prueba de punta a punta superada: código de acceso → recibo leído con Opus → pregunta respondida |
 
 ## Arquitectura
 
@@ -83,7 +84,7 @@ Solo entra quien canjea un **código de acceso** creado por el administrador. Qu
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje) `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10) y `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; **pendiente de aplicar**). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
@@ -95,11 +96,11 @@ Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos d
 ## Hoja de ruta (en este orden)
 
 0. ✅ Migración `0002` (códigos de acceso) aplicada en Supabase.
-1. **Render arriba y una factura real probada, por Telegram.** Cargar las variables de entorno y validar la lectura con Opus (incluso con fotos borrosas).
+1. ✅ **Render arriba y una factura real probada, por Telegram** (2026-11-10): el servicio está en vivo, se canjeó un código, se leyó un recibo real con Opus y se respondió una pregunta con la API real de Claude. Pendiente: probar más facturas (borrosas, PDF, con IVA) y la prueba de modelos para las preguntas (Haiku 5.5 frente a Sonnet 5.5).
 2. **Detalle por concepto.** La extracción devuelve cada renglón (descripción, cantidad, valor unitario, valor de la línea); tabla nueva `papeleo_expense_items` (migración `0003`). Si la suma de renglones no coincide con el total, la factura se marca «revisar».
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por el chat.
 4. **Consultas libres en lenguaje natural** (capa 1, ver abajo). ✅ Código hecho: respuestas humanas, memoria de la conversación, registro en `papeleo_query_log`, «¿te sirvió? 👍 👎» y tope diario (migración `0004`, aplicada). **El envío de archivos queda para después de Drive (paso 3)** para no escribirlo dos veces.
-5. **Base de conocimiento** (ver abajo): glosario por empresa, ejemplos aprobados y panel «Aprendizaje» en `/admin` (migración `0006`).
+5. **Base de conocimiento** (ver abajo): glosario por empresa, ejemplos aprobados y panel «Aprendizaje» en `/admin` (migración `0007`).
 6. **Activar WhatsApp** como segundo canal cuando llegue el número (variables `WHATSAPP_*`, webhook de Meta y migración `channel`/`external_id`). Habilita además los PDF por ese canal.
 
 ### Consultas en lenguaje natural
@@ -130,7 +131,26 @@ Filtros comunes: `desde`, `hasta`, `categoria`, `proveedor`, `texto` (palabra en
 
 **Cómo funciona una pregunta (`src/handler.ts`):** el texto que no es un atajo (`resumen`, `borrar`, `hoja`, `/start`, `ayuda`) se envía al asistente. Antes se revisa el tope diario (`QUERY_DAILY_CAP`, por defecto 40 por persona y día, contado en la base de datos para que sobreviva a reinicios). La memoria sale de `papeleo_query_log` (últimos 6 turnos de la misma persona dentro de 30 minutos), no de la memoria del servidor: Render gratis duerme y «¿y el mes pasado?» dejaría de funcionar. Cada respuesta `ok` pregunta «¿Te sirvió?» con botones 👍/👎. El bucle de herramientas se limita a 4 vueltas; si el modelo manda parámetros inválidos recibe el error y puede corregirse una vez; si falla otra vez, responde «no pude» y queda registrado como `sin_respuesta`.
 
-**Modelo y costo:** `QUERY_MODEL` (por defecto `claude-opus-5-5`, el modelo recomendado por defecto). Cada pregunta hace de 2 a 4 llamadas, así que es la variable que más pesa en el costo: si hace falta ahorrar, `QUERY_MODEL=claude-sonnet-5-5` cuesta la mitad. El mensaje de sistema y las herramientas son estables y se envían con caché de prompt. No se activó el reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`): las preguntas sobre facturas no suelen activarlos y un rechazo se responde con «no pude responder eso».
+**Modelo y costo:** `QUERY_MODEL` (por defecto `claude-opus-5-5`). Cada pregunta hace de 2 a 4 llamadas, así que es la variable que más pesa en el costo. Medido con una pregunta real: 13.559 tokens de entrada y 696 de salida, repartidos en 5 llamadas al modelo y 4 consultas a la base (≈ $0,07 con Opus 5.5, ≈ $0,035 con Sonnet 5.5, ≈ $0,002 con Haiku 5.5, según los precios publicados). **En Render se configuró `QUERY_MODEL=claude-sonnet-5-5` y luego `claude-haiku-5-5` para una prueba de calidad** (la variable manda sobre el valor por defecto del código); el resultado de la comparación se anotará aquí. Recomendación de fondo: Opus solo para **leer** facturas, donde la precisión importa, y un modelo más barato para las preguntas. El mensaje de sistema y las herramientas son estables y se envían con caché de prompt (pesan ≈2.300 tokens, que podría ser menos que el mínimo cacheable de algunos modelos). No se activó el reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`): las preguntas sobre facturas no suelen activarlos y un rechazo se responde con «no pude responder eso».
+
+### Costo real de leer facturas
+
+Cada lectura guarda en `papeleo_documents` el modelo y los tokens que cobró la API: `extraction_model`, `tokens_in` (incluye los leídos y escritos en caché) y `tokens_out` (incluye el razonamiento interno del modelo). Se registra incluso cuando la lectura no produjo resultado, porque igual se cobra; los documentos anteriores a la migración `0006` quedan en null. Guardar el consumo es un paso aparte y tolerante a fallos: si falla, la factura se procesa igual y el error queda en el log.
+
+Costo por mes (ajustar los precios por millón de tokens si cambian; con Opus 5.5 son $4 de entrada y $20 de salida; contar la caché a precio completo da una cota superior):
+
+```sql
+select date_trunc('month', created_at) as mes,
+       count(*) as lecturas,
+       sum(tokens_in) as tokens_entrada,
+       sum(tokens_out) as tokens_salida,
+       round(sum(tokens_in) * 4.0 / 1e6 + sum(tokens_out) * 20.0 / 1e6, 2) as costo_usd_opus_5_5
+from papeleo_documents
+where tokens_in is not null
+group by 1 order by 1 desc;
+```
+
+Estimación previa a medir (100 facturas al mes leídas con Opus): entre $2 y $7, lo más probable ≈ $4; lo más incierto es el razonamiento interno del modelo. Con las preguntas (50 a 60 al mes) el total mensual iría de ≈$2 a ≈$11 según el modelo elegido para preguntar.
 
 **Capa 2 (solo si la capa 1 no alcanza, y solo con aprobación expresa): SQL generado por la IA** sobre *vistas de solo lectura* ya filtradas por empresa. Exigiría: rol de base de datos de solo lectura distinto del servicio, vistas que lean `org_id` de un valor fijado por el servidor (nunca por la IA), validar que sea un único `SELECT`, `statement_timeout` corto, límite de filas, bitácora de cada sentencia y pruebas de aislamiento entre empresas. Es más flexible pero más riesgosa; por eso va aparte y después.
 
@@ -155,7 +175,7 @@ Filtros comunes: `desde`, `hasta`, `categoria`, `proveedor`, `texto` (palabra en
 
 Objetivo: que el asistente entienda cada vez mejor cómo hablan los usuarios. **No es entrenar el modelo**: es guardar lo que se aprende y dárselo como contexto en cada pregunta.
 
-| Tabla (migración `0004`/`0006`) | Contenido | Quién la ve |
+| Tabla (migración `0004`/`0007`) | Contenido | Quién la ve |
 |---|---|---|
 | `papeleo_query_log` | cada pregunta, la consulta interpretada, el resultado resumido, estado (`ok`, `sin_respuesta`, `error`), 👍/👎, tokens y fecha | solo la empresa dueña; el administrador en el panel |
 | `papeleo_org_glossary` | vocabulario propio de una empresa: «el almacén de la esquina» → proveedor Éxito; «combustible» ≈ «tanqueo» | solo esa empresa |
@@ -234,6 +254,6 @@ Servicio web `papeleo` (plan free, región Virginia) conectado a la rama `main` 
 - URL: `https://papeleo.onrender.com` · health check: `GET /health`
 - Webhooks: WhatsApp `https://papeleo.onrender.com/webhook`, Telegram `https://papeleo.onrender.com/telegram/webhook`
 
-**Estado al 2026-11-10:** el único despliegue (de un commit anterior) falló al arrancar con `Falta la variable de entorno WHATSAPP_APP_SECRET`: no hay variables cargadas en Render. Además corrió con Node 26, antes de fijar Node 22 (`engines`). `main` ya tiene el código nuevo (Telegram + control de acceso + panel). Hay que cargar las variables de «Dónde conseguir cada dato» (mínimo: Supabase, Anthropic, Telegram y `ADMIN_PASSWORD`) y redesplegar. Con Telegram ya no se exigen las de WhatsApp.
+**Estado al 2026-11-10:** el servicio está **en vivo** y registra solo el webhook de Telegram al arrancar (`Papeleo escuchando… (canales: Telegram)`). Los primeros intentos fallaron por variables: quedaban `WHATSAPP_*` incompletas (si hay alguna, el código exige las cuatro; con Telegram deben borrarse todas) y una `ADMIN_PASSWORD` de menos de 12 caracteres. Guardar variables en Render **no siempre redespliega**; un cambio de variable por la API sí lanza un despliegue nuevo. El despliegue automático por commit no se observó en el servicio: tras fusionar a `main` conviene verificar que haya un despliegue nuevo o lanzarlo a mano.
 
 Nota: el plan free de Render duerme el servicio tras un rato sin tráfico; el primer mensaje de WhatsApp después de eso puede tardar en responder. Considerar un plan de pago antes de usarlo en producción.

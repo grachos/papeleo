@@ -36,19 +36,20 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 
 ## Hoja de ruta (orden acordado)
 
-0. ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10).
-1. **Render arriba**: `main` ya tiene el código; faltan las variables de entorno (README «Dónde conseguir cada dato») y probar una factura real con Opus **por Telegram**. Sin probar contra Telegram real.
+0. ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10). **`0006_extraction_usage.sql` (consumo de la lectura) escrita, pendiente de aplicar.**
+1. ✅ **Render arriba y probado por Telegram** (2026-11-10, servicio en vivo): código de acceso → recibo leído con Opus → pregunta respondida con la API real. Pendiente: más facturas (borrosas, PDF, con IVA) y la prueba de modelos para las preguntas (Haiku 5.5 vs Sonnet 5.5; `QUERY_MODEL` en Render está en `claude-haiku-5-5` para esa prueba). Guardar variables en Render no siempre redespliega; verificar que haya un despliegue nuevo tras cada fusión a `main`.
 2. Extracción con conceptos + migración `0003` (`papeleo_expense_items`, `tipo_documento`, nombre de archivo).
 3. Almacenamiento en Google Drive (el usuario crea una carpeta y la comparte como editor con la cuenta de servicio).
 4. ✅ Consultas libres en lenguaje natural (capa 1) en código, con `papeleo_query_log`, 👍/👎, memoria y tope diario (incluye `campo` iva/subtotal). **Migración `0004` aplicada y verificada el 2026-11-10 en `real-samaria`** (detalle en README); falta fusionar a `main` y cargar las variables en Render. El aviso del linter sobre `papeleo_like_escape` se corrigió con la migración `0005`. La petición real a la API de Claude no se ha probado (sin credenciales en el entorno de desarrollo). El envío de archivos va después de Drive.
-5. Base de conocimiento: glosario por empresa, ejemplos aprobados, pantalla «Aprendizaje» en `/admin` (migración `0006`).
+5. Base de conocimiento: glosario por empresa, ejemplos aprobados, pantalla «Aprendizaje» en `/admin` (migración `0007`).
 6. Activar WhatsApp como segundo canal cuando llegue el número (y PDF por ese canal).
 
 ## Convenciones
 
 - Español en mensajes al usuario, comentarios y commits. Código e identificadores técnicos como están.
 - Los tests usan dependencias simuladas inyectadas (`Deps`); mantener ese patrón. El SQL de las migraciones se prueba contra Postgres real en memoria (PGlite, `tests/migrations.test.ts`): toda función SQL nueva lleva pruebas de aislamiento entre empresas y de permisos.
-- Modelo de las consultas: variable `QUERY_MODEL` (por defecto `claude-opus-5-5`); `claude-sonnet-5-5` es la opción más económica si el usuario lo decide.
+- Modelo de las consultas: variable `QUERY_MODEL` (por defecto en código `claude-opus-5-5`; en Render se cambia por variable, que manda sobre el código). Costos medidos y comparación en el README «Modelo y costo». Opus se reserva para **leer** facturas; un modelo más barato para preguntar.
+- **Consumo de la lectura**: cada lectura registra modelo y tokens en `papeleo_documents` (`extraction_model`, `tokens_in`, `tokens_out`, migración `0006`). Ese registro es tolerante a fallos y nunca debe impedir procesar una factura. Consulta de costo mensual en el README «Costo real de leer facturas».
 - Migraciones nuevas en `supabase/migrations/000N_*.sql`; no editar `0001_init.sql` ya aplicada.
 - Trabajar en la rama indicada por la sesión; no abrir PR sin que el usuario lo pida. Si su PR ya se fusionó, reiniciar la rama desde `main` antes de seguir.
 - **Documentar siempre** (orden del usuario): cada cambio de código, decisión, variable de entorno, migración o cambio de estado se refleja en `README.md` y `CLAUDE.md` en el mismo commit. Al decidir algo nuevo con el usuario, escribirlo aquí antes de dar la tarea por cerrada.

@@ -15,6 +15,7 @@ import type {
   ResumenRow,
   StorePort,
   Turn,
+  Usage,
 } from "./types.js";
 
 const EXT: Record<string, string> = {
@@ -271,12 +272,21 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort {
     if (res.error) throw res.error;
   }
 
-  async finishDocument(documentId: string, status: string, extraction?: Extraction) {
+  async finishDocument(documentId: string, status: string, extraction?: Extraction, usage?: Usage) {
     const res = await this.db
       .from("papeleo_documents")
       .update({ status, extraction: extraction ?? null, doc_type: extraction?.tipo ?? null })
       .eq("id", documentId);
     if (res.error) throw res.error;
+
+    // El consumo se guarda aparte y sin romper nada: si falla (p. ej. migración sin aplicar), la factura igual se procesa.
+    if (usage) {
+      const u = await this.db
+        .from("papeleo_documents")
+        .update({ extraction_model: usage.model, tokens_in: usage.tokensIn, tokens_out: usage.tokensOut })
+        .eq("id", documentId);
+      if (u.error) console.error("No se pudo registrar el consumo de la lectura", u.error);
+    }
   }
 
   async saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense) {

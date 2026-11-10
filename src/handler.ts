@@ -191,9 +191,9 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
     }
     await deps.store.saveFile(org.id, documentId, data, mimeType, sha256);
 
-    const extraction = await deps.extractor.extract(data, mimeType);
+    const { extraction, usage } = await deps.extractor.extract(data, mimeType);
     if (!extraction || !extraction.es_comprobante || extraction.total === null) {
-      await deps.store.finishDocument(documentId, "no_reconocido", extraction ?? undefined);
+      await deps.store.finishDocument(documentId, "no_reconocido", extraction ?? undefined, usage);
       return deps.wa.sendText(
         to,
         "Guardé el archivo, pero no pude leer en él un comprobante con valor total. Intenta con una foto más nítida y completa.",
@@ -216,7 +216,7 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
       descripcion: extraction.descripcion,
       confianza: extraction.confianza,
     });
-    await deps.store.finishDocument(documentId, "procesado", extraction);
+    await deps.store.finishDocument(documentId, "procesado", extraction, usage);
 
     let note = "";
     if (org.sheet_id && deps.sheets.enabled) {
