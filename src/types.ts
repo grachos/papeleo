@@ -110,6 +110,79 @@ export interface AdminPort {
   revokeMember(id: string): Promise<void>;
 }
 
+export interface QueryFilters {
+  desde?: string;
+  hasta?: string;
+  categoria?: string;
+  proveedor?: string;
+  texto?: string;
+  valor_min?: number;
+  valor_max?: number;
+  moneda?: string;
+}
+
+export interface ResumenRow {
+  grupo: string;
+  moneda: string;
+  valor: number;
+  cantidad: number;
+  /** Facturas que traen el dato pedido (el IVA o el subtotal no siempre están). */
+  con_dato: number;
+  total_grupos: number;
+}
+
+export interface Turn {
+  question: string;
+  answer: string;
+}
+
+export type QueryStatus = "ok" | "sin_respuesta" | "error";
+
+export interface QueryLogEntry {
+  orgId: string;
+  memberId: string;
+  question: string;
+  answer: string;
+  plan: unknown;
+  status: QueryStatus;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/** Acceso de solo lectura a los gastos para el asistente. Todo se filtra por empresa; la IA nunca la elige. */
+export interface QueryPort {
+  resumir(
+    orgId: string,
+    a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number; campo: string },
+  ): Promise<ResumenRow[]>;
+  listar(orgId: string, a: QueryFilters & { orden: string; limite: number }): Promise<{ rows: Expense[]; total: number }>;
+  detalle(orgId: string, id: string): Promise<Expense | null>;
+  /** Devuelve el id del registro (para el 👍/👎). */
+  logQuery(entry: QueryLogEntry): Promise<string>;
+  recentTurns(memberId: string, sinceIso: string, limit: number): Promise<Turn[]>;
+  countSince(memberId: string, sinceIso: string): Promise<number>;
+  setFeedback(logId: string, memberId: string, value: "up" | "down"): Promise<void>;
+}
+
+export interface AssistantInput {
+  orgId: string;
+  question: string;
+  today: string;
+  history: Turn[];
+}
+
+export interface AssistantResult {
+  text: string;
+  status: QueryStatus;
+  plan: unknown;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+export interface AssistantPort {
+  answer(input: AssistantInput): Promise<AssistantResult>;
+}
+
 export interface ExtractorPort {
   extract(data: Buffer, mimeType: string): Promise<Extraction | null>;
 }
@@ -129,6 +202,11 @@ export interface Deps {
   extractor: ExtractorPort;
   sheets: SheetsPort;
   today?: () => string;
+  /** Asistente de consultas en lenguaje natural (si falta, el texto libre recibe la ayuda). */
+  assistant?: AssistantPort;
+  query?: QueryPort;
+  /** Máximo de preguntas por persona y día (por defecto 40). */
+  dailyCap?: number;
   /** Límite de intentos de canje fallidos por remitente (opcional). */
   limiter?: { allowed(key: string): boolean; fail(key: string): void; reset(key: string): void };
 }

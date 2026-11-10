@@ -1,5 +1,6 @@
 import express from "express";
 import { AttemptLimiter } from "./access.js";
+import { ClaudeAssistant } from "./assistant.js";
 import { createAdminRouter } from "./admin.js";
 import { loadConfig } from "./config.js";
 import { ClaudeExtractor } from "./extract.js";
@@ -21,11 +22,16 @@ const noWhatsApp: MessengerPort = {
 
 const telegramClient = config.telegram ? new TelegramClient(config.telegram.botToken) : null;
 
+const store = new SupabaseStore(config.supabase.url, config.supabase.serviceRoleKey, config.supabase.bucket);
+
 const deps: Deps = {
   limiter: new AttemptLimiter(5, 60 * 60 * 1000), // 5 códigos erróneos por hora y remitente
   wa: config.whatsapp ? new WhatsAppClient(config.whatsapp) : noWhatsApp,
   tg: telegramClient ?? undefined,
-  store: new SupabaseStore(config.supabase.url, config.supabase.serviceRoleKey, config.supabase.bucket),
+  store,
+  query: store,
+  assistant: new ClaudeAssistant(config.queryModel, store),
+  dailyCap: config.queryDailyCap,
   extractor: new ClaudeExtractor(config.extractionModel),
   sheets: new GoogleSheets(config.googleServiceAccountJson),
 };
@@ -33,7 +39,6 @@ const deps: Deps = {
 const app = express();
 app.set("trust proxy", 1); // Render termina TLS y reenvía la IP real
 
-const store = deps.store as SupabaseStore;
 let botUsername: string | null = null;
 
 if (config.adminPassword) {

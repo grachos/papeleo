@@ -1,7 +1,21 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Extraction } from "./extract.js";
 import { generateCode, hashCode, normalizeCode } from "./access.js";
-import type { AdminCode, AdminMember, AdminPort, Expense, Member, NewExpense, Org, StorePort } from "./types.js";
+import type {
+  AdminCode,
+  AdminMember,
+  AdminPort,
+  Expense,
+  Member,
+  NewExpense,
+  Org,
+  QueryFilters,
+  QueryLogEntry,
+  QueryPort,
+  ResumenRow,
+  StorePort,
+  Turn,
+} from "./types.js";
 
 const EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -19,7 +33,7 @@ function toExpense(row: any): Expense {
   return { ...row, subtotal: num(row.subtotal), iva: num(row.iva), total: Number(row.total) };
 }
 
-export class SupabaseStore implements StorePort, AdminPort {
+export class SupabaseStore implements StorePort, AdminPort, QueryPort {
   private db: SupabaseClient;
 
   constructor(url: string, serviceRoleKey: string, private bucket: string) {
@@ -50,6 +64,117 @@ export class SupabaseStore implements StorePort, AdminPort {
       member: { id: row.r_member_id, org_id: row.r_org_id, phone, name },
       org: { id: row.r_org_id, name: row.r_org_name, sheet_id: row.r_sheet_id },
     };
+  }
+
+  // --- Consultas del asistente (solo lectura; todo pasa por funciones SQL con org_id fijado por el servidor) ---
+
+  private filterParams(f: QueryFilters) {
+    return {
+      p_desde: f.desde ?? null,
+      p_hasta: f.hasta ?? null,
+      p_categoria: f.categoria ?? null,
+      p_proveedor: f.proveedor ?? null,
+      p_texto: f.texto ?? null,
+      p_valor_min: f.valor_min ?? null,
+      p_valor_max: f.valor_max ?? null,
+      p_moneda: f.moneda ?? null,
+    };
+  }
+
+  async resumir(orgId: string, a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number; campo: string }) {
+    const res = await this.db.rpc("papeleo_resumir", {
+      p_org_id: orgId,
+      p_medida: a.medida,
+      p_agrupar: a.agrupar,
+      p_orden: a.orden,
+      p_limite: a.limite,
+      p_campo: a.campo,
+      ...this.filterParams(a),
+    });
+    if (res.error) throw res.error;
+    return (res.data as any[]).map(
+      (r): ResumenRow => ({
+        grupo: r.grupo,
+        moneda: r.moneda,
+        valor: Number(r.valor),
+        cantidad: Number(r.cantidad),
+        con_dato: Number(r.con_dato),
+        total_grupos: Number(r.total_grupos),
+      }),
+    );
+  }
+
+  async listar(orgId: string, a: QueryFilters & { orden: string; limite: number }) {
+    const res = await this.db.rpc("papeleo_listar", {
+      p_org_id: orgId,
+      p_orden: a.orden,
+      p_limite: a.limite,
+      ...this.filterParams(a),
+    });
+    if (res.error) throw res.error;
+    const rows = res.data as any[];
+    return { rows: rows.map(({ total_filas, ...e }) => toExpense(e)), total: rows.length ? Number(rows[0].total_filas) : 0 };
+  }
+
+  async detalle(orgId: string, id: string) {
+    // El filtro por org_id impide leer un gasto de otra empresa aunque se conozca (o se invente) su id.
+    const res = await this.db
+      .from("papeleo_expenses")
+      .select(EXPENSE_COLUMNS)
+      .eq("id", id)
+      .eq("org_id", orgId)
+      .eq("estado", "registrado")
+      .maybeSingle();
+    if (res.error) throw res.error;
+    return res.data ? toExpense(res.data) : null;
+  }
+
+  async logQuery(e: QueryLogEntry) {
+    const res = await this.db
+      .from("papeleo_query_log")
+      .insert({
+        org_id: e.orgId,
+        member_id: e.memberId,
+        question: e.question,
+        answer: e.answer,
+        plan: e.plan,
+        status: e.status,
+        tokens_in: e.tokensIn,
+        tokens_out: e.tokensOut,
+      })
+      .select("id")
+      .single();
+    if (res.error) throw res.error;
+    return res.data.id as string;
+  }
+
+  async recentTurns(memberId: string, sinceIso: string, limit: number): Promise<Turn[]> {
+    const res = await this.db
+      .from("papeleo_query_log")
+      .select("question, answer")
+      .eq("member_id", memberId)
+      .eq("status", "ok")
+      .gte("created_at", sinceIso)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (res.error) throw res.error;
+    return (res.data as Turn[]).reverse();
+  }
+
+  async countSince(memberId: string, sinceIso: string) {
+    const res = await this.db
+      .from("papeleo_query_log")
+      .select("id", { count: "exact", head: true })
+      .eq("member_id", memberId)
+      .gte("created_at", sinceIso);
+    if (res.error) throw res.error;
+    return res.count ?? 0;
+  }
+
+  async setFeedback(logId: string, memberId: string, value: "up" | "down") {
+    // Solo la persona que hizo la pregunta puede valorarla.
+    const res = await this.db.from("papeleo_query_log").update({ feedback: value }).eq("id", logId).eq("member_id", memberId);
+    if (res.error) throw res.error;
   }
 
   // --- Panel de administración ---
