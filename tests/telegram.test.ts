@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { handleMessage } from "../src/handler.js";
@@ -141,7 +142,8 @@ describe("loadConfig", () => {
   it("exige una contraseña de administrador de al menos 12 caracteres", () => {
     const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
     expect(() => withEnv({ ...tg, ADMIN_PASSWORD: "corta" })).toThrow("ADMIN_PASSWORD");
-    expect(withEnv({ ...tg, ADMIN_PASSWORD: "una-clave-larga-123" }).adminPassword).toBe("una-clave-larga-123");
+    const long = `test-${randomBytes(8).toString("hex")}`;
+    expect(withEnv({ ...tg, ADMIN_PASSWORD: long }).adminPassword).toBe(long);
   });
 
   it("exige al menos un canal y un secreto válido", () => {

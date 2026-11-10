@@ -1,10 +1,11 @@
+import { randomBytes } from "node:crypto";
 import type { Server } from "node:http";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAdminRouter } from "../src/admin.js";
 import type { AdminPort } from "../src/types.js";
 
-const PASSWORD = "una-clave-larga-123";
+const PASSWORD = `test-${randomBytes(8).toString("hex")}`; // generada en cada corrida: no hay contraseñas escritas en el código
 const ID = "0b3c5c52-7a0e-4b51-9c61-3a2f6f1e9a10";
 
 let server: Server | null = null;
