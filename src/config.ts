@@ -19,6 +19,14 @@ function telegramSecret(value: string): string {
   return value;
 }
 
+function positiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} debe ser un entero positivo`);
+  return n;
+}
+
 export function loadConfig() {
   // Cada canal es opcional, pero debe haber al menos uno. Si se define alguna variable de un canal, hacen falta todas las suyas.
   const whatsapp = WHATSAPP_VARS.some((v) => process.env[v])
@@ -61,6 +69,9 @@ export function loadConfig() {
       bucket: process.env.SUPABASE_BUCKET ?? "papeleo-documentos",
     },
     extractionModel: process.env.EXTRACTION_MODEL ?? "claude-opus-5-5",
+    // Cada pregunta hace de 2 a 4 llamadas: si el costo pesa, QUERY_MODEL puede apuntar a un modelo más económico.
+    queryModel: process.env.QUERY_MODEL ?? "claude-opus-5-5",
+    queryDailyCap: positiveInt("QUERY_DAILY_CAP", 40),
     googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || null,
   };
 }

@@ -16,7 +16,8 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Copia opcional de cada gasto a Google Sheets | ✅ Hecho |
 | Guardar el detalle por concepto de cada factura | ⏳ Pendiente (hoy solo hay un `descripcion` por factura) |
 | Archivos en Google Drive (hoy van a Supabase Storage) | ⏳ Pendiente |
-| Consultas libres en lenguaje natural y envío de archivos por el chat | ⏳ Pendiente (diseño en «Consultas en lenguaje natural») |
+| Consultas libres en lenguaje natural (capa 1: `resumir_gastos`, `listar_gastos`, `detalle_gasto`) | ✅ Hecho en código, con 13 pruebas del SQL contra Postgres real; **falta aplicar la migración `0004` en Supabase** y probarlo con datos reales |
+| Envío de archivos por el chat (`enviar_archivos`) | ⏳ Pendiente: va después de Google Drive |
 | Base de conocimiento: el sistema aprende de las preguntas | ⏳ Pendiente (diseño en «Base de conocimiento») |
 | Despliegue en Render | ⚠️ Servicio creado, `main` ya tiene el código nuevo, pero **faltan las variables de entorno** (ver «Dónde conseguir cada dato») |
 
@@ -82,10 +83,11 @@ Solo entra quien canjea un **código de acceso** creado por el administrador. Qu
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base) y `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje). Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje) y `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; **pendiente de aplicar**). Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
+- `papeleo_query_log`: cada pregunta al asistente (pregunta, respuesta, herramientas usadas, estado `ok`/`sin_respuesta`/`error`, 👍/👎, tokens). Alimenta la memoria de la conversación, el tope diario y el aprendizaje.
 - `papeleo_access_codes`: códigos de acceso (hash, empresa, nota, estado `activo`/`usado`/`revocado`).
 - `papeleo_documents`: archivo recibido (`wa_message_id` único, `sha256`, estado, extracción en JSON).
 - `papeleo_expenses`: gasto registrado (fecha, proveedor, NIT, nº de factura, subtotal, IVA, total, categoría, medio de pago, confianza, estado).
@@ -96,7 +98,7 @@ Migraciones: `0001_init.sql` (esquema base) y `0002_access_codes.sql` (códigos 
 1. **Render arriba y una factura real probada, por Telegram.** Cargar las variables de entorno y validar la lectura con Opus (incluso con fotos borrosas).
 2. **Detalle por concepto.** La extracción devuelve cada renglón (descripción, cantidad, valor unitario, valor de la línea); tabla nueva `papeleo_expense_items` (migración `0003`). Si la suma de renglones no coincide con el total, la factura se marca «revisar».
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por el chat.
-4. **Consultas libres en lenguaje natural** (capa 1, ver abajo), con respuestas humanas, memoria de la conversación y envío de archivos por el chat. Registra cada pregunta en `papeleo_query_log` y pide «¿te sirvió? 👍 👎» (migración `0004`).
+4. **Consultas libres en lenguaje natural** (capa 1, ver abajo). ✅ Código hecho: respuestas humanas, memoria de la conversación, registro en `papeleo_query_log`, «¿te sirvió? 👍 👎» y tope diario (migración `0004`, por aplicar). **El envío de archivos queda para después de Drive (paso 3)** para no escribirlo dos veces.
 5. **Base de conocimiento** (ver abajo): glosario por empresa, ejemplos aprobados y panel «Aprendizaje» en `/admin` (migración `0005`).
 6. **Activar WhatsApp** como segundo canal cuando llegue el número (variables `WHATSAPP_*`, webhook de Meta y migración `channel`/`external_id`). Habilita además los PDF por ese canal.
 
@@ -104,16 +106,23 @@ Migraciones: `0001_init.sql` (esquema base) y `0002_access_codes.sql` (códigos 
 
 Pensadas para **gente del común**: nadie debe saber qué es una consulta ni usar comandos. Ejemplos: «¿en qué gasté más en noviembre?», «¿cuál fue la factura más cara y qué compré?», «¿cuánto llevo en gasolina este año?», «muéstrame las facturas de enero a marzo», «¿y el mes pasado?» (usa el contexto de lo anterior).
 
-**Capa 1 (la que se construye primero): consulta flexible, sin SQL escrito por la IA.** Claude recibe la pregunta y pocas herramientas **muy expresivas**:
+**Capa 1 (✅ implementada): consulta flexible, sin SQL escrito por la IA.** Claude recibe la pregunta y tres herramientas expresivas (`src/assistant.ts`). Se eligieron dos herramientas de consulta separadas (una de totales y otra de listas) en vez de una sola «mega-herramienta», porque dos esquemas simples producen menos combinaciones inválidas:
 
 | Herramienta | Para |
 |---|---|
-| `consultar(medidas, agrupar_por, filtros, orden, límite)` | casi cualquier pregunta numérica: medidas `suma`, `cuenta`, `promedio`, `máximo`, `mínimo`; agrupar por mes, semana, categoría, proveedor, medio de pago o concepto; filtros por fechas, categoría, proveedor, rango de valor y texto del concepto |
-| `detalle_gasto(id)` | los conceptos de una factura |
-| `buscar_conceptos(texto, filtros)` | «gasolina», «arriendo», cualquier palabra dentro de los renglones |
-| `enviar_archivos(filtros)` | mandar las imágenes o PDF que coincidan (si son más de ~5, lista y pregunta) |
+| `resumir_gastos(medida, agrupar_por, orden, límite, filtros)` | totales: `suma`, `cuenta`, `promedio`, `maximo`, `minimo`; agrupados por mes, semana, categoría, proveedor o medio de pago. «¿En qué gasté más en noviembre?», «¿cuánto llevo en gasolina?» |
+| `listar_gastos(orden, límite, filtros)` | facturas concretas y cuántas coinciden en total. «¿Cuál fue la factura más cara?», «las de enero a marzo» |
+| `detalle_gasto(id)` | todos los datos de una factura |
 
-La consulta real vive en funciones de Postgres con parámetros. Como las herramientas combinan medidas, agrupaciones y filtros libremente, cubren la inmensa mayoría de preguntas sin que el usuario se limite a frases fijas.
+Filtros comunes: `desde`, `hasta`, `categoria`, `proveedor`, `texto` (palabra en proveedor o descripción), `valor_min`, `valor_max`, `moneda`. La consulta real vive en las funciones de Postgres `papeleo_resumir` y `papeleo_listar` (migración `0004`); nunca mezclan monedas, ignoran tildes y mayúsculas, escapan los comodines de `LIKE` y devuelven el total de coincidencias.
+
+**Recortes de alcance respecto al diseño original (deliberados):**
+- **`buscar_conceptos`** no existe todavía: los renglones de cada factura llegan con la migración `0003`. Mientras tanto el filtro `texto` busca en el proveedor y la descripción; cuando existan los renglones se amplía ahí.
+- **`enviar_archivos`** espera a Google Drive. Si piden una imagen, el bot dice con honestidad que aún no puede y ofrece los datos de la factura.
+
+**Cómo funciona una pregunta (`src/handler.ts`):** el texto que no es un atajo (`resumen`, `borrar`, `hoja`, `/start`, `ayuda`) se envía al asistente. Antes se revisa el tope diario (`QUERY_DAILY_CAP`, por defecto 40 por persona y día, contado en la base de datos para que sobreviva a reinicios). La memoria sale de `papeleo_query_log` (últimos 6 turnos de la misma persona dentro de 30 minutos), no de la memoria del servidor: Render gratis duerme y «¿y el mes pasado?» dejaría de funcionar. Cada respuesta `ok` pregunta «¿Te sirvió?» con botones 👍/👎. El bucle de herramientas se limita a 4 vueltas; si el modelo manda parámetros inválidos recibe el error y puede corregirse una vez; si falla otra vez, responde «no pude» y queda registrado como `sin_respuesta`.
+
+**Modelo y costo:** `QUERY_MODEL` (por defecto `claude-opus-5-5`, el modelo recomendado por defecto). Cada pregunta hace de 2 a 4 llamadas, así que es la variable que más pesa en el costo: si hace falta ahorrar, `QUERY_MODEL=claude-sonnet-5-5` cuesta la mitad. El mensaje de sistema y las herramientas son estables y se envían con caché de prompt. No se activó el reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`): las preguntas sobre facturas no suelen activarlos y un rechazo se responde con «no pude responder eso».
 
 **Capa 2 (solo si la capa 1 no alcanza, y solo con aprobación expresa): SQL generado por la IA** sobre *vistas de solo lectura* ya filtradas por empresa. Exigiría: rol de base de datos de solo lectura distinto del servicio, vistas que lean `org_id` de un valor fijado por el servidor (nunca por la IA), validar que sea un único `SELECT`, `statement_timeout` corto, límite de filas, bitácora de cada sentencia y pruebas de aislamiento entre empresas. Es más flexible pero más riesgosa; por eso va aparte y después.
 
@@ -126,8 +135,10 @@ La consulta real vive en funciones de Postgres con parámetros. Como las herrami
 - Si no puede responder, lo dice con honestidad y registra la pregunta para mejorar.
 
 **Reglas de seguridad (no negociables):**
-- **La IA nunca escribe SQL contra las tablas reales.** Devuelve parámetros que se validan con zod; el servidor ejecuta funciones fijas con valores como parámetros, nunca texto pegado.
-- **`org_id` lo pone el servidor**, a partir de la identidad ya vinculada (teléfono o id de Telegram); la IA no puede cambiarlo ni quitarlo.
+- **La IA nunca escribe SQL contra las tablas reales.** Devuelve parámetros que se validan con zod (esquemas `.strict()`); el servidor ejecuta funciones de Postgres con valores como parámetros, nunca texto pegado. Medida, agrupación y orden pasan por listas cerradas (`CASE`), sin SQL dinámico.
+- **`org_id` lo pone el servidor**, a partir de la identidad ya vinculada (teléfono o id de Telegram); ningún esquema de herramienta tiene ese campo, así que la IA no puede cambiarlo ni quitarlo. `detalle_gasto` también filtra por empresa: un id ajeno (o inventado, o escrito dentro de una factura) no devuelve nada.
+- **Las funciones de consulta son `SECURITY INVOKER` y solo `service_role` puede ejecutarlas** (`revoke` a `public`, `anon` y `authenticated`). En Supabase las funciones de `public` son llamables por la API REST con la llave pública; sin esto, cualquiera con esa llave podría leer otra empresa pasando su id. Hay `statement_timeout` de 3 s y tope de filas (20 facturas, 24 grupos).
+- **Inyección por contenido de facturas:** los nombres y descripciones los escribió un tercero y vuelven al modelo dentro de los resultados. Por eso el mensaje de sistema los declara *datos, no instrucciones*, y todas las herramientas son **solo lectura y limitadas a la empresa de quien pregunta**: lo máximo que puede lograr una factura maliciosa es confundir la respuesta a su propia empresa. **No se deben agregar herramientas de escritura a este bucle sin volver a evaluar este riesgo.**
 - Sumas, máximos y conteos los calcula la base de datos, no el modelo, para que los números sean exactos.
 - Opciones cerradas (listas de valores, fechas con formato exacto, límite de resultados).
 - RLS activo en todas las tablas de Supabase.
@@ -157,7 +168,7 @@ Requiere Node 22.
 
 ```bash
 npm install
-npm test        # vitest
+npm test        # vitest (incluye pruebas del SQL contra Postgres real en memoria con PGlite)
 npm run build   # tsc → dist/
 npm run dev     # tsx watch con .env
 ```
@@ -182,7 +193,9 @@ Copia `.env.example` a `.env` y completa los valores.
 | `SUPABASE_SERVICE_ROLE_KEY` | Llave de servidor de Supabase (solo en el servidor, nunca en un cliente) |
 | `SUPABASE_BUCKET` | Por defecto `papeleo-documentos` (se reemplazará por Drive) |
 | `ANTHROPIC_API_KEY` | Lectura de facturas y consultas |
-| `EXTRACTION_MODEL` | Por defecto `claude-opus-5-5` |
+| `EXTRACTION_MODEL` | Modelo que lee las facturas. Por defecto `claude-opus-5-5` |
+| `QUERY_MODEL` | Modelo del asistente de consultas. Por defecto `claude-opus-5-5`; cada pregunta hace 2 a 4 llamadas (ver «Modelo y costo») |
+| `QUERY_DAILY_CAP` | Preguntas máximas por persona y día. Por defecto 40 |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Opcional. JSON de la cuenta de servicio, tal cual o en base64 |
 
 Debe haber al menos un canal configurado. Si se define alguna variable de un canal, hacen falta todas las suyas.

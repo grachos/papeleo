@@ -7,6 +7,11 @@ import type { Deps, IncomingMessage, Member, Org } from "./types.js";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
+const FEEDBACK_PREFIX = "fb:";
+const DEFAULT_DAILY_CAP = 40;
+const MAX_QUESTION_CHARS = 500;
+const MEMORY_MINUTES = 30; // la conversación se recuerda mientras no pasen más de 30 min entre mensajes
+const MEMORY_TURNS = 6;
 
 export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promise<void> {
   // Cada mensaje se responde por el mismo canal por el que llegó.
@@ -30,6 +35,7 @@ export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promis
       if (msg.buttonId?.startsWith(DISCARD_PREFIX)) {
         return discard(member, deps, msg.buttonId.slice(DISCARD_PREFIX.length));
       }
+      if (msg.buttonId?.startsWith(FEEDBACK_PREFIX)) return feedback(msg.buttonId, member, deps);
       return;
     case "text":
       return handleText(msg.text ?? "", member, org, deps);
@@ -83,7 +89,66 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
     );
   }
 
-  return deps.wa.sendText(member.phone, HELP);
+  if (["start", "ayuda", "help", "menu", "menú"].includes(command)) return deps.wa.sendText(member.phone, HELP);
+
+  return askAssistant(text, member, org, deps);
+}
+
+/** Cualquier otro texto es una pregunta en lenguaje natural sobre los gastos. */
+async function askAssistant(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
+  const { assistant, query } = deps;
+  if (!assistant || !query) return deps.wa.sendText(member.phone, HELP);
+
+  const today = (deps.today ?? todayBogota)();
+  const dayStart = `${today}T05:00:00Z`; // medianoche en Colombia (UTC-5)
+  const cap = deps.dailyCap ?? DEFAULT_DAILY_CAP;
+  if ((await query.countSince(member.id, dayStart)) >= cap) {
+    return deps.wa.sendText(
+      member.phone,
+      `Hoy ya hiciste ${cap} preguntas, que es el máximo por día. Mañana puedes seguir preguntando. Mientras tanto, puedes enviarme facturas y escribir *resumen*.`,
+    );
+  }
+
+  const question = text.trim().slice(0, MAX_QUESTION_CHARS);
+  const since = new Date(Date.now() - MEMORY_MINUTES * 60_000).toISOString();
+  const history = await query.recentTurns(member.id, since, MEMORY_TURNS);
+  const result = await assistant.answer({ orgId: org.id, question, today, history });
+
+  // Se registra siempre: alimenta la memoria, el tope diario y el aprendizaje.
+  const logId = await query
+    .logQuery({
+      orgId: org.id,
+      memberId: member.id,
+      question,
+      answer: result.text,
+      plan: result.plan,
+      status: result.status,
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+    })
+    .catch((err) => {
+      console.error("No se pudo registrar la pregunta", err);
+      return null;
+    });
+
+  if (result.status !== "ok" || !logId) return deps.wa.sendText(member.phone, result.text);
+
+  const buttons = [
+    { id: `${FEEDBACK_PREFIX}up:${logId}`, title: "👍 Sí" },
+    { id: `${FEEDBACK_PREFIX}down:${logId}`, title: "👎 No" },
+  ];
+  // Los botones de WhatsApp admiten cuerpos de hasta 1024 caracteres: si la respuesta es larga, va aparte.
+  if (result.text.length <= 900) return deps.wa.sendButtons(member.phone, `${result.text}\n\n¿Te sirvió?`, buttons);
+  await deps.wa.sendText(member.phone, result.text);
+  return deps.wa.sendButtons(member.phone, "¿Te sirvió esta respuesta?", buttons);
+}
+
+async function feedback(buttonId: string, member: Member, deps: Deps): Promise<void> {
+  const [, value, logId] = buttonId.split(":");
+  if ((value === "up" || value === "down") && logId) {
+    await deps.query?.setFeedback(logId, member.id, value);
+    await deps.wa.sendText(member.phone, value === "up" ? "¡Gracias! 🙌" : "Gracias por avisarme. Voy a tratar de hacerlo mejor.");
+  }
 }
 
 async function discard(member: Member, deps: Deps, expenseId?: string): Promise<void> {
