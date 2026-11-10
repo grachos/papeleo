@@ -50,9 +50,10 @@ create or replace function papeleo_resumir(
   p_valor_max numeric default null,
   p_moneda text default null,
   p_orden text default 'valor_desc',
-  p_limite integer default 12
+  p_limite integer default 12,
+  p_campo text default 'total'
 )
-returns table (grupo text, moneda text, valor numeric, cantidad bigint, total_grupos bigint)
+returns table (grupo text, moneda text, valor numeric, cantidad bigint, con_dato bigint, total_grupos bigint)
 language plpgsql
 stable
 security invoker
@@ -71,10 +72,14 @@ begin
   if coalesce(p_orden, '') not in ('valor_desc', 'valor_asc', 'grupo_asc', 'grupo_desc') then
     raise exception 'orden_invalido';
   end if;
+  if coalesce(p_campo, '') not in ('total', 'subtotal', 'iva') then
+    raise exception 'campo_invalido';
+  end if;
 
   return query
   with base as (
     select e.*,
+      case p_campo when 'subtotal' then e.subtotal when 'iva' then e.iva else e.total end as v_campo,
       case p_agrupar
         when 'mes' then to_char(e.fecha, 'YYYY-MM')
         when 'semana' then to_char(date_trunc('week', e.fecha), 'YYYY-MM-DD')
@@ -105,17 +110,18 @@ begin
            else b.g_key end as g_label,
       b.moneda as g_moneda,
       case p_medida
-        when 'suma' then sum(b.total)
-        when 'promedio' then round(avg(b.total), 2)
-        when 'maximo' then max(b.total)
-        when 'minimo' then min(b.total)
+        when 'suma' then sum(b.v_campo)
+        when 'promedio' then round(avg(b.v_campo), 2)
+        when 'maximo' then max(b.v_campo)
+        when 'minimo' then min(b.v_campo)
         else count(*)::numeric
       end as v,
-      count(*) as n
+      count(*) as n,
+      count(b.v_campo) as n_dato   -- facturas que sí traen ese dato (el IVA, p. ej., no siempre está)
     from base b
     group by b.g_key, b.moneda
   )
-  select a.g_label, a.g_moneda, a.v, a.n, count(*) over ()
+  select a.g_label, a.g_moneda, a.v, a.n, a.n_dato, count(*) over ()
   from agg a
   order by
     case p_orden when 'valor_desc' then a.v end desc nulls last,
@@ -142,8 +148,8 @@ create or replace function papeleo_listar(
   p_limite integer default 10
 )
 returns table (
-  id uuid, fecha date, proveedor text, nit text, numero_factura text, total numeric, moneda text,
-  categoria text, medio_pago text, descripcion text, confianza text, total_filas bigint
+  id uuid, fecha date, proveedor text, nit text, numero_factura text, subtotal numeric, iva numeric, total numeric,
+  moneda text, categoria text, medio_pago text, descripcion text, confianza text, total_filas bigint
 )
 language plpgsql
 stable
@@ -159,7 +165,7 @@ begin
   end if;
 
   return query
-  select e.id, e.fecha, e.proveedor, e.nit, e.numero_factura, e.total, e.moneda,
+  select e.id, e.fecha, e.proveedor, e.nit, e.numero_factura, e.subtotal, e.iva, e.total, e.moneda,
          e.categoria, e.medio_pago, e.descripcion, e.confianza, count(*) over ()
   from papeleo_expenses e
   where e.org_id = p_org_id
@@ -186,10 +192,10 @@ $$;
 
 -- Solo el servidor (service_role) puede ejecutarlas.
 revoke all on function papeleo_like_escape(text) from public, anon, authenticated;
-revoke all on function papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer)
+revoke all on function papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer, text)
   from public, anon, authenticated;
 revoke all on function papeleo_listar(uuid, date, date, text, text, text, numeric, numeric, text, text, integer)
   from public, anon, authenticated;
 grant execute on function papeleo_like_escape(text) to service_role;
-grant execute on function papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer) to service_role;
+grant execute on function papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer, text) to service_role;
 grant execute on function papeleo_listar(uuid, date, date, text, text, text, numeric, numeric, text, text, integer) to service_role;

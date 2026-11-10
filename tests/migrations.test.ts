@@ -17,7 +17,7 @@ async function seedOrg(org: string) {
   await db.query("insert into papeleo_members (id, org_id, phone) values ($1, $2, $3)", [org.replace(/^./, "c"), org, `tg:${org.slice(0, 1)}`]);
 }
 
-async function expense(org: string, e: { fecha: string; proveedor?: string | null; total: number; moneda?: string; categoria?: string; estado?: string; descripcion?: string }) {
+async function expense(org: string, e: { fecha: string; proveedor?: string | null; total: number; moneda?: string; categoria?: string; estado?: string; descripcion?: string; subtotal?: number; iva?: number }) {
   n += 1;
   const member = org.replace(/^./, "c");
   const doc = await db.query<{ id: string }>(
@@ -25,15 +25,15 @@ async function expense(org: string, e: { fecha: string; proveedor?: string | nul
     [org, member, `m${n}`],
   );
   await db.query(
-    `insert into papeleo_expenses (org_id, member_id, document_id, fecha, proveedor, total, moneda, categoria, estado, descripcion, confianza)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'alta')`,
-    [org, member, doc.rows[0].id, e.fecha, e.proveedor ?? null, e.total, e.moneda ?? "COP", e.categoria ?? "otros", e.estado ?? "registrado", e.descripcion ?? null],
+    `insert into papeleo_expenses (org_id, member_id, document_id, fecha, proveedor, total, moneda, categoria, estado, descripcion, subtotal, iva, confianza)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'alta')`,
+    [org, member, doc.rows[0].id, e.fecha, e.proveedor ?? null, e.total, e.moneda ?? "COP", e.categoria ?? "otros", e.estado ?? "registrado", e.descripcion ?? null, e.subtotal ?? null, e.iva ?? null],
   );
 }
 
 const resumir = (org: string, over: Record<string, unknown> = {}) => {
-  const a = { medida: "suma", agrupar: "ninguno", desde: null, hasta: null, categoria: null, proveedor: null, texto: null, vmin: null, vmax: null, moneda: null, orden: "valor_desc", limite: 12, ...over };
-  return db.query<any>("select * from papeleo_resumir($1::uuid,$2,$3,$4::date,$5::date,$6,$7,$8,$9::numeric,$10::numeric,$11,$12,$13::int)", [org, a.medida, a.agrupar, a.desde, a.hasta, a.categoria, a.proveedor, a.texto, a.vmin, a.vmax, a.moneda, a.orden, a.limite]);
+  const a = { medida: "suma", agrupar: "ninguno", desde: null, hasta: null, categoria: null, proveedor: null, texto: null, vmin: null, vmax: null, moneda: null, orden: "valor_desc", limite: 12, campo: "total", ...over };
+  return db.query<any>("select * from papeleo_resumir($1::uuid,$2,$3,$4::date,$5::date,$6,$7,$8,$9::numeric,$10::numeric,$11,$12,$13::int,$14)", [org, a.medida, a.agrupar, a.desde, a.hasta, a.categoria, a.proveedor, a.texto, a.vmin, a.vmax, a.moneda, a.orden, a.limite, a.campo]);
 };
 const listar = (org: string, over: Record<string, unknown> = {}) => {
   const a = { desde: null, hasta: null, categoria: null, proveedor: null, texto: null, vmin: null, vmax: null, moneda: null, orden: "fecha_desc", limite: 10, ...over };
@@ -52,9 +52,9 @@ beforeAll(async () => {
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
-  await expense(ORG_A, { fecha: "2026-10-05", proveedor: "Éxito", total: 100000, categoria: "mercado_hogar" });
+  await expense(ORG_A, { fecha: "2026-10-05", proveedor: "Éxito", total: 100000, categoria: "mercado_hogar", subtotal: 84034, iva: 15966 });
   await expense(ORG_A, { fecha: "2026-10-20", proveedor: "EXITO S.A.", total: 50000, categoria: "mercado_hogar" });
-  await expense(ORG_A, { fecha: "2026-11-02", proveedor: "Terpel", total: 80000, categoria: "combustible", descripcion: "Gasolina corriente" });
+  await expense(ORG_A, { fecha: "2026-11-02", proveedor: "Terpel", total: 80000, categoria: "combustible", descripcion: "Gasolina corriente", subtotal: 67227, iva: 12773 });
   await expense(ORG_A, { fecha: "2026-11-03", proveedor: "Hotel Sol", total: 30, moneda: "USD", categoria: "hospedaje" });
   await expense(ORG_A, { fecha: "2026-11-04", proveedor: "Borrado", total: 999999, estado: "descartado" });
   await expense(ORG_B, { fecha: "2026-11-02", proveedor: "Éxito", total: 7000000 });
@@ -111,7 +111,17 @@ describe("papeleo_resumir", () => {
     expect(Number((await resumir(ORG_B)).rows[0].valor)).toBe(7000000);
   });
 
-  it("rechaza medida, agrupación y orden fuera de la lista", async () => {
+  it("suma el IVA y el subtotal, e informa cuántas facturas traen ese dato", async () => {
+    const iva = (await resumir(ORG_A, { campo: "iva", moneda: "COP" })).rows[0];
+    expect(Number(iva.valor)).toBe(15966 + 12773);
+    expect(Number(iva.cantidad)).toBe(3); // tres facturas en COP…
+    expect(Number(iva.con_dato)).toBe(2); // …pero solo dos traen IVA
+    const sub = (await resumir(ORG_A, { campo: "subtotal", moneda: "COP" })).rows[0];
+    expect(Number(sub.valor)).toBe(84034 + 67227);
+  });
+
+  it("rechaza medida, agrupación, orden y campo fuera de la lista", async () => {
+    await expect(resumir(ORG_A, { campo: "total; select 1" })).rejects.toThrow("campo_invalido");
     await expect(resumir(ORG_A, { medida: "suma; drop table papeleo_expenses" })).rejects.toThrow("medida_invalida");
     await expect(resumir(ORG_A, { agrupar: "fecha" })).rejects.toThrow("agrupar_invalido");
     await expect(resumir(ORG_A, { orden: "x" })).rejects.toThrow("orden_invalido");
@@ -131,6 +141,13 @@ describe("papeleo_listar", () => {
     expect(r.rows.every((x: any) => x.proveedor !== "Borrado")).toBe(true);
   });
 
+  it("devuelve el subtotal y el IVA de cada factura (no \"null\" por omisión)", async () => {
+    const r = await listar(ORG_A, { proveedor: "terpel" });
+    expect(r.rows).toHaveLength(1);
+    expect(Number(r.rows[0].iva)).toBe(12773);
+    expect(Number(r.rows[0].subtotal)).toBe(67227);
+  });
+
   it("topa el límite en 20 e informa el total de coincidencias", async () => {
     for (let i = 0; i < 25; i++) await expense(ORG_B, { fecha: "2026-09-01", proveedor: `P${i}`, total: 10 });
     const r = await listar(ORG_B, { limite: 100, desde: "2026-09-01", hasta: "2026-09-30" });
@@ -141,7 +158,7 @@ describe("papeleo_listar", () => {
 
 describe("permisos", () => {
   it("anon y authenticated no pueden ejecutar las funciones; service_role sí", async () => {
-    const sig = "papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer)";
+    const sig = "papeleo_resumir(uuid, text, text, date, date, text, text, text, numeric, numeric, text, text, integer, text)";
     const priv = async (role: string, fn: string) => (await db.query<any>(`select has_function_privilege('${role}', '${fn}', 'execute') as ok`)).rows[0].ok;
     for (const fn of [sig, "papeleo_listar(uuid, date, date, text, text, text, numeric, numeric, text, text, integer)"]) {
       expect(await priv("anon", fn)).toBe(false);

@@ -102,7 +102,12 @@ async function askAssistant(text: string, member: Member, org: Org, deps: Deps):
   const today = (deps.today ?? todayBogota)();
   const dayStart = `${today}T05:00:00Z`; // medianoche en Colombia (UTC-5)
   const cap = deps.dailyCap ?? DEFAULT_DAILY_CAP;
-  if ((await query.countSince(member.id, dayStart)) >= cap) {
+  const used = await query.countSince(member.id, dayStart).catch((err) => {
+    console.error("No se pudo contar las preguntas del día", err);
+    return null;
+  });
+  if (used === null) return deps.wa.sendText(member.phone, "Tuve un problema para atender tu pregunta. Inténtalo de nuevo en unos minutos.");
+  if (used >= cap) {
     return deps.wa.sendText(
       member.phone,
       `Hoy ya hiciste ${cap} preguntas, que es el máximo por día. Mañana puedes seguir preguntando. Mientras tanto, puedes enviarme facturas y escribir *resumen*.`,
@@ -111,7 +116,11 @@ async function askAssistant(text: string, member: Member, org: Org, deps: Deps):
 
   const question = text.trim().slice(0, MAX_QUESTION_CHARS);
   const since = new Date(Date.now() - MEMORY_MINUTES * 60_000).toISOString();
-  const history = await query.recentTurns(member.id, since, MEMORY_TURNS);
+  // Sin memoria se puede seguir respondiendo; solo se pierde el contexto de la conversación.
+  const history = await query.recentTurns(member.id, since, MEMORY_TURNS).catch((err) => {
+    console.error("No se pudo leer la conversación reciente", err);
+    return [];
+  });
   const result = await assistant.answer({ orgId: org.id, question, today, history });
 
   // Se registra siempre: alimenta la memoria, el tope diario y el aprendizaje.
@@ -146,7 +155,7 @@ async function askAssistant(text: string, member: Member, org: Org, deps: Deps):
 async function feedback(buttonId: string, member: Member, deps: Deps): Promise<void> {
   const [, value, logId] = buttonId.split(":");
   if ((value === "up" || value === "down") && logId) {
-    await deps.query?.setFeedback(logId, member.id, value);
+    await deps.query?.setFeedback(logId, member.id, value).catch((err) => console.error("No se pudo guardar la valoración", err));
     await deps.wa.sendText(member.phone, value === "up" ? "¡Gracias! 🙌" : "Gracias por avisarme. Voy a tratar de hacerlo mejor.");
   }
 }

@@ -126,6 +126,8 @@ export interface ResumenRow {
   moneda: string;
   valor: number;
   cantidad: number;
+  /** Facturas que traen el dato pedido (el IVA o el subtotal no siempre están). */
+  con_dato: number;
   total_grupos: number;
 }
 
@@ -151,7 +153,7 @@ export interface QueryLogEntry {
 export interface QueryPort {
   resumir(
     orgId: string,
-    a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number },
+    a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number; campo: string },
   ): Promise<ResumenRow[]>;
   listar(orgId: string, a: QueryFilters & { orden: string; limite: number }): Promise<{ rows: Expense[]; total: number }>;
   detalle(orgId: string, id: string): Promise<Expense | null>;

@@ -110,7 +110,7 @@ Pensadas para **gente del común**: nadie debe saber qué es una consulta ni usa
 
 | Herramienta | Para |
 |---|---|
-| `resumir_gastos(medida, agrupar_por, orden, límite, filtros)` | totales: `suma`, `cuenta`, `promedio`, `maximo`, `minimo`; agrupados por mes, semana, categoría, proveedor o medio de pago. «¿En qué gasté más en noviembre?», «¿cuánto llevo en gasolina?» |
+| `resumir_gastos(medida, campo, agrupar_por, orden, límite, filtros)` | totales: `suma`, `cuenta`, `promedio`, `maximo`, `minimo` del `total`, el `subtotal` o el `iva`; agrupados por mes, semana, categoría, proveedor o medio de pago. «¿En qué gasté más en noviembre?», «¿cuánto llevo en gasolina?», «¿cuánto IVA pagué este año?». Informa cuántas facturas traen ese dato, para no afirmar «no tiene IVA» cuando solo faltó leerlo |
 | `listar_gastos(orden, límite, filtros)` | facturas concretas y cuántas coinciden en total. «¿Cuál fue la factura más cara?», «las de enero a marzo» |
 | `detalle_gasto(id)` | todos los datos de una factura |
 
@@ -119,6 +119,12 @@ Filtros comunes: `desde`, `hasta`, `categoria`, `proveedor`, `texto` (palabra en
 **Recortes de alcance respecto al diseño original (deliberados):**
 - **`buscar_conceptos`** no existe todavía: los renglones de cada factura llegan con la migración `0003`. Mientras tanto el filtro `texto` busca en el proveedor y la descripción; cuando existan los renglones se amplía ahí.
 - **`enviar_archivos`** espera a Google Drive. Si piden una imagen, el bot dice con honestidad que aún no puede y ofrece los datos de la factura.
+
+**Si la base de datos falla** (por ejemplo, la migración `0004` aún no está aplicada): sin poder contar el tope diario, el bot responde «Tuve un problema para atender tu pregunta» en vez de callarse; sin memoria de la conversación, responde igual pero sin contexto; si no se puede guardar la valoración 👍/👎, no pasa nada. Todos esos fallos quedan en el log del servidor.
+
+**Qué NO está verificado todavía:** la petición real a la API de Claude (esquemas de herramientas, formato de la respuesta) nunca se ha ejecutado, porque este entorno no tiene credenciales; todas las pruebas usan un cliente simulado. Los esquemas usan solo palabras estándar de JSON Schema. La primera pregunta real en Render es la prueba definitiva: si falla, el bot responde «Tuve un problema…» y el error queda en el log. Además, mensaje de sistema + herramientas suman ≈2.300 tokens, que podría ser menos que el mínimo para el caché de prompt de ese modelo; se puede comprobar en `usage.cache_read_input_tokens`.
+
+**Orden de puesta en marcha (importante):** 1) aplicar la migración `0004` en Supabase; 2) verificarla (permisos de `anon`/`authenticated` en falso, empresa inexistente devuelve vacío, medida inválida lanza error, búsqueda con tilde funciona); 3) recién entonces fusionar a `main` y cargar las variables en Render. Fusionar antes dejaría un bot que no responde ninguna pregunta libre.
 
 **Cómo funciona una pregunta (`src/handler.ts`):** el texto que no es un atajo (`resumen`, `borrar`, `hoja`, `/start`, `ayuda`) se envía al asistente. Antes se revisa el tope diario (`QUERY_DAILY_CAP`, por defecto 40 por persona y día, contado en la base de datos para que sobreviva a reinicios). La memoria sale de `papeleo_query_log` (últimos 6 turnos de la misma persona dentro de 30 minutos), no de la memoria del servidor: Render gratis duerme y «¿y el mes pasado?» dejaría de funcionar. Cada respuesta `ok` pregunta «¿Te sirvió?» con botones 👍/👎. El bucle de herramientas se limita a 4 vueltas; si el modelo manda parámetros inválidos recibe el error y puede corregirse una vez; si falla otra vez, responde «no pude» y queda registrado como `sin_respuesta`.
 

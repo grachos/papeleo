@@ -81,13 +81,14 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort {
     };
   }
 
-  async resumir(orgId: string, a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number }) {
+  async resumir(orgId: string, a: QueryFilters & { medida: string; agrupar: string; orden: string; limite: number; campo: string }) {
     const res = await this.db.rpc("papeleo_resumir", {
       p_org_id: orgId,
       p_medida: a.medida,
       p_agrupar: a.agrupar,
       p_orden: a.orden,
       p_limite: a.limite,
+      p_campo: a.campo,
       ...this.filterParams(a),
     });
     if (res.error) throw res.error;
@@ -97,6 +98,7 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort {
         moneda: r.moneda,
         valor: Number(r.valor),
         cantidad: Number(r.cantidad),
+        con_dato: Number(r.con_dato),
         total_grupos: Number(r.total_grupos),
       }),
     );

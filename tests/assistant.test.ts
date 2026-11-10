@@ -13,7 +13,7 @@ const expense: Expense = {
 
 function makeQuery(over: Partial<QueryPort> = {}) {
   const q = {
-    resumir: vi.fn(async () => [{ grupo: "total", moneda: "COP", valor: 230000, cantidad: 3, total_grupos: 1 }]),
+    resumir: vi.fn(async () => [{ grupo: "total", moneda: "COP", valor: 230000, cantidad: 3, con_dato: 3, total_grupos: 1 }]),
     listar: vi.fn(async () => ({ rows: [expense], total: 37 })),
     detalle: vi.fn(async () => expense as Expense | null),
     logQuery: vi.fn(),
@@ -66,7 +66,7 @@ describe("runTool", () => {
   it("usa SIEMPRE la empresa recibida y completa los valores por defecto", async () => {
     const q = makeQuery();
     await runTool("resumir_gastos", { medida: "suma", categoria: "combustible" }, ORG, q);
-    expect(q.resumir).toHaveBeenCalledWith(ORG, expect.objectContaining({ medida: "suma", agrupar: "ninguno", orden: "valor_desc", limite: 12, categoria: "combustible" }));
+    expect(q.resumir).toHaveBeenCalledWith(ORG, expect.objectContaining({ medida: "suma", agrupar: "ninguno", orden: "valor_desc", limite: 12, campo: "total", categoria: "combustible" }));
   });
 
   it("rechaza org_id, campos extra, enumeraciones y fechas inválidas", async () => {
@@ -85,8 +85,8 @@ describe("runTool", () => {
   it("entrega el dinero ya formateado junto al número, y las cuentas sin signo de pesos", async () => {
     const q = makeQuery({
       resumir: vi.fn(async () => [
-        { grupo: "total", moneda: "COP", valor: 230000, cantidad: 3, total_grupos: 2 },
-        { grupo: "total", moneda: "USD", valor: 30, cantidad: 1, total_grupos: 2 },
+        { grupo: "total", moneda: "COP", valor: 230000, cantidad: 3, con_dato: 3, total_grupos: 2 },
+        { grupo: "total", moneda: "USD", valor: 30, cantidad: 1, con_dato: 1, total_grupos: 2 },
       ]),
     });
     const out: any = await runTool("resumir_gastos", { medida: "suma" }, ORG, q);
@@ -95,6 +95,14 @@ describe("runTool", () => {
     expect(out.grupos[1].valor_formateado).toMatch(/^USD 30/);
     const count: any = await runTool("resumir_gastos", { medida: "cuenta" }, ORG, q);
     expect(count.grupos[0].valor_formateado).toBe("230000");
+  });
+
+  it("el IVA pedido llega con cuántas facturas lo traen, para que el modelo no diga «no tiene IVA»", async () => {
+    const q = makeQuery({ resumir: vi.fn(async () => [{ grupo: "total", moneda: "COP", valor: 28739, cantidad: 12, con_dato: 9, total_grupos: 1 }]) });
+    const out: any = await runTool("resumir_gastos", { medida: "suma", campo: "iva" }, ORG, q);
+    expect(q.resumir).toHaveBeenCalledWith(ORG, expect.objectContaining({ campo: "iva" }));
+    expect(out.grupos[0]).toMatchObject({ facturas: 12, facturas_con_ese_dato: 9 });
+    await expect(runTool("resumir_gastos", { medida: "suma", campo: "descuento" }, ORG, q)).rejects.toThrow();
   });
 
   it("listar informa el total de coincidencias; detalle consulta con la empresa y avisa si no existe", async () => {

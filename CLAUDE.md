@@ -40,7 +40,7 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 1. **Render arriba**: `main` ya tiene el código; faltan las variables de entorno (README «Dónde conseguir cada dato») y probar una factura real con Opus **por Telegram**. Sin probar contra Telegram real.
 2. Extracción con conceptos + migración `0003` (`papeleo_expense_items`, `tipo_documento`, nombre de archivo).
 3. Almacenamiento en Google Drive (el usuario crea una carpeta y la comparte como editor con la cuenta de servicio).
-4. ✅ Consultas libres en lenguaje natural (capa 1) en código, con `papeleo_query_log`, 👍/👎, memoria y tope diario. **Falta aplicar la migración `0004` y probar con datos reales.** El envío de archivos va después de Drive.
+4. ✅ Consultas libres en lenguaje natural (capa 1) en código, con `papeleo_query_log`, 👍/👎, memoria y tope diario (incluye `campo` iva/subtotal). **Orden obligatorio: aplicar `0004` → verificarla → recién entonces fusionar a `main`** (si no, el bot no responde preguntas libres). La petición real a la API de Claude no se ha probado (sin credenciales en el entorno de desarrollo). El envío de archivos va después de Drive.
 5. Base de conocimiento: glosario por empresa, ejemplos aprobados, pantalla «Aprendizaje» en `/admin` (migración `0005`).
 6. Activar WhatsApp como segundo canal cuando llegue el número (y PDF por ese canal).
 

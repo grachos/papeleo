@@ -73,6 +73,26 @@ describe("texto libre → asistente", () => {
     expect(String((tg.sendText.mock.calls[0] as any)[1])).toContain("máximo por día");
   });
 
+  it("si la base falla al contar, avisa con honestidad en vez de quedarse callado", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tg, query, assistant, deps } = setup();
+    query.countSince.mockRejectedValue(new Error('relation "papeleo_query_log" does not exist'));
+    await handleMessage(msg({}), deps);
+    expect(assistant.answer).not.toHaveBeenCalled();
+    expect(String((tg.sendText.mock.calls[0] as any)[1])).toContain("Tuve un problema");
+    spy.mockRestore();
+  });
+
+  it("si falla la memoria de la conversación, igual responde (sin contexto)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tg, query, assistant, deps } = setup();
+    query.recentTurns.mockRejectedValue(new Error("timeout"));
+    await handleMessage(msg({}), deps);
+    expect((assistant.answer.mock.calls[0] as any)[0].history).toEqual([]);
+    expect(tg.sendButtons).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
+
   it("los atajos siguen siendo deterministas: no gastan IA", async () => {
     const { assistant, tg, deps } = setup();
     for (const text of ["resumen", "/resumen", "borrar", "/start", "ayuda"]) await handleMessage(msg({ text }), deps);
@@ -109,6 +129,15 @@ describe("valoración 👍/👎", () => {
     await handleMessage(msg({ kind: "button", buttonId: "fb:down:log-1", text: undefined }), deps);
     expect(query.setFeedback).toHaveBeenCalledWith("log-1", "m1", "down");
     expect(tg.sendText).toHaveBeenCalledOnce();
+  });
+
+  it("si no se puede guardar la valoración, igual no revienta", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tg, query, deps } = setup();
+    query.setFeedback.mockRejectedValue(new Error("db"));
+    await handleMessage(msg({ kind: "button", buttonId: "fb:up:log-1", text: undefined }), deps);
+    expect(tg.sendText).toHaveBeenCalledOnce();
+    spy.mockRestore();
   });
 
   it("ignora valores inválidos", async () => {

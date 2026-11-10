@@ -47,6 +47,10 @@ export const ResumirArgs = z
       .optional()
       .describe("Orden de los grupos. Use grupo_asc para ver meses o semanas en orden cronológico"),
     limite: z.number().int().min(1).max(24).optional().describe("Máximo de grupos a devolver (por defecto 12)"),
+    campo: z
+      .enum(["total", "subtotal", "iva"])
+      .optional()
+      .describe("Qué valor de la factura calcular: el total (por defecto), el subtotal antes de IVA, o el IVA. Úsalo para «¿cuánto IVA pagué?»"),
     ...Filtros,
   })
   .strict();
@@ -105,6 +109,7 @@ CÓMO TRABAJAS
 - Las fechas relativas («este mes», «el mes pasado», «este año», «ayer») se calculan desde la fecha de hoy que se te da al comienzo de cada pregunta. Si hay una conversación previa, úsala: «¿y el mes pasado?» sigue hablando de lo mismo.
 - Si la pregunta es ambigua en algo que cambia la respuesta, haz UNA sola pregunta corta para aclarar, en vez de adivinar. Si es razonable suponer algo, supónlo y dilo.
 - Si no hay resultados, dilo con naturalidad y sugiere cómo ampliar la búsqueda (otras fechas, otro nombre).
+- Si «facturas_con_ese_dato» es menor que «facturas», algunas facturas no traen ese dato (por ejemplo, no todas muestran el IVA): dilo con claridad («de 12 facturas, 9 traen el IVA»). Nunca digas que una factura «no tiene IVA» solo porque el dato viene vacío: puede que simplemente no se leyó.
 - Si hay facturas en monedas distintas, preséntalas por separado; nunca las sumes.
 
 LÍMITES (sé honesto)
@@ -155,6 +160,7 @@ export async function runTool(name: string, input: unknown, orgId: string, query
         agrupar: a.agrupar_por ?? "ninguno",
         orden: a.orden ?? "valor_desc",
         limite: a.limite ?? 12,
+        campo: a.campo ?? "total",
       });
       return {
         grupos: rows.map((r) => ({
@@ -163,6 +169,8 @@ export async function runTool(name: string, input: unknown, orgId: string, query
           valor: r.valor,
           valor_formateado: medida === "cuenta" ? String(r.valor) : fmt(r.valor, r.moneda),
           facturas: r.cantidad,
+          // Si es menor que «facturas», algunas no traen ese dato (p. ej. el IVA) y hay que decirlo.
+          facturas_con_ese_dato: r.con_dato,
         })),
         total_de_grupos: rows[0]?.total_grupos ?? 0,
         mostrando: rows.length,
