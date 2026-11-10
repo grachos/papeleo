@@ -31,13 +31,20 @@ export interface Expense {
 
 export type NewExpense = Omit<Expense, "id">;
 
-/** Mensaje entrante ya normalizado desde el webhook de WhatsApp. */
+export type Channel = "whatsapp" | "instagram";
+
+/**
+ * Mensaje entrante ya normalizado desde el webhook del canal.
+ * `from` identifica al remitente: teléfono en WhatsApp; en Instagram, el id del usuario con prefijo `ig:`.
+ */
 export interface IncomingMessage {
   id: string;
+  channel?: Channel; // por defecto, whatsapp
   from: string;
   senderName: string | null;
   kind: "text" | "media" | "button" | "other";
   text?: string;
+  /** WhatsApp: id del medio. Instagram: URL del adjunto. */
   mediaId?: string;
   mimeType?: string;
   buttonId?: string;
@@ -48,11 +55,14 @@ export interface Button {
   title: string;
 }
 
-export interface WhatsAppPort {
+/** Canal de mensajería (WhatsApp o Instagram). */
+export interface MessengerPort {
   sendText(to: string, body: string): Promise<void>;
   sendButtons(to: string, body: string, buttons: Button[]): Promise<void>;
   downloadMedia(mediaId: string): Promise<{ data: Buffer; mimeType: string }>;
 }
+
+export type WhatsAppPort = MessengerPort;
 
 export interface StorePort {
   findOrCreateMember(
@@ -82,7 +92,10 @@ export interface SheetsPort {
 }
 
 export interface Deps {
-  wa: WhatsAppPort;
+  /** Canal de WhatsApp (el de por defecto). */
+  wa: MessengerPort;
+  /** Canal de Instagram, si está configurado. */
+  ig?: MessengerPort;
   store: StorePort;
   extractor: ExtractorPort;
   sheets: SheetsPort;

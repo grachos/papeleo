@@ -15,7 +15,7 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 
 ## Decisiones del proyecto (no re-discutir sin que el usuario lo pida)
 
-- **WhatsApp es el front.** No hay app web ni comando `ver`: el usuario pide en lenguaje natural («facturas de enero a marzo», “¿cuál fue la factura más cara?”).
+- **El chat es el front; WhatsApp es el destino final, pendiente hasta que el usuario consiga el número.** Mientras tanto se prueba por **Instagram (DM)**, mismo `handler` y respuesta por el mismo canal. Lo de WhatsApp se deja para después (variables `WHATSAPP_*`, webhook, migración `channel`/`external_id`, PDF). Instagram: solo imágenes, sin botones (usa respuestas rápidas), textos ≤900 caracteres, ids con prefijo `ig:` en `papeleo_members.phone`. No hay app web ni comando `ver`: el usuario pide en lenguaje natural («facturas de enero a marzo», “¿cuál fue la factura más cara?”).
 - **Datos en Supabase; archivos en Google Drive** (5 TB del usuario). Hoy los archivos van a Supabase Storage: es deuda a migrar. En BD se guarda `drive_file_id`, no rutas. Drive es privado; el servidor reenvía los archivos por WhatsApp, nunca enlaces públicos.
 - **Nombre de archivo:** `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`; carpetas `Empresa/AAAA/MM/`. Prefijos: `fac`, `rec`, `cc`, `tiq`.
 - **Cada factura guarda su detalle por concepto** (tabla `papeleo_expense_items`) para no tener que abrir el PDF. Si la suma de renglones ≠ total, marcar «revisar».
@@ -33,11 +33,12 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 
 ## Hoja de ruta (orden acordado)
 
-1. Render arriba (cargar variables) y probar una factura real con Opus. **Estado: despliegue caído por falta de variables de entorno.**
+1. Render arriba (cargar variables) y probar una factura real con Opus **por Instagram**. **Estado: despliegue caído por falta de variables de entorno; el código de Instagram ya está, sin probar contra Meta real.**
 2. Extracción con conceptos + migración `0002` (`papeleo_expense_items`, `tipo_documento`, nombre de archivo).
 3. Almacenamiento en Google Drive (el usuario crea una carpeta y la comparte como editor con la cuenta de servicio).
 4. Consultas en lenguaje natural con herramientas + envío de archivos por WhatsApp (si hay más de ~5 resultados, mandar lista y preguntar).
-5. Códigos de invitación para vincular números a una empresa.
+5. Activar WhatsApp cuando llegue el número (y PDF).
+6. Códigos de invitación para vincular cuentas a una empresa.
 
 ## Convenciones
 

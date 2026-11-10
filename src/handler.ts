@@ -7,7 +7,13 @@ import type { Deps, IncomingMessage, Member, Org } from "./types.js";
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
 
-export async function handleMessage(msg: IncomingMessage, deps: Deps): Promise<void> {
+export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promise<void> {
+  // Cada mensaje se responde por el mismo canal por el que llegó.
+  let deps = allDeps;
+  if (msg.channel === "instagram") {
+    if (!allDeps.ig) throw new Error("Llegó un mensaje de Instagram pero el canal no está configurado");
+    deps = { ...allDeps, wa: allDeps.ig };
+  }
   const { member, org, isNew } = await deps.store.findOrCreateMember(msg.from, msg.senderName);
   if (isNew) {
     await deps.wa.sendText(msg.from, `👋 Hola${member.name ? `, ${member.name}` : ""}. Soy tu asistente de gastos.\n\n${HELP}`);
