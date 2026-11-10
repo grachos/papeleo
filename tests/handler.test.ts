@@ -10,6 +10,8 @@ import { parseWebhook, verifySignature } from "../src/whatsapp.js";
 const member = { id: "m1", org_id: "o1", phone: "573001112233", name: "Ana" };
 const org = { id: "o1", name: "Ana", sheet_id: null as string | null };
 
+const usage = { model: "claude-opus-5-5", tokensIn: 2100, tokensOut: 900 };
+
 const extraction: Extraction = {
   es_comprobante: true,
   tipo: "tiquete_pos",
@@ -51,7 +53,7 @@ function makeDeps(over: { extraction?: Extraction | null; sheetId?: string | nul
       listExpenses: vi.fn(async () => saved),
       setSheet: vi.fn(async () => {}),
     },
-    extractor: { extract: vi.fn(async () => (over.extraction === undefined ? extraction : over.extraction)) },
+    extractor: { extract: vi.fn(async () => ({ extraction: over.extraction === undefined ? extraction : over.extraction, usage })) },
     sheets: { enabled: true, serviceAccountEmail: "bot@x.iam", appendExpense: vi.fn(async () => {}) },
     today: () => "2026-11-09",
   };
@@ -74,7 +76,7 @@ describe("handleMessage", () => {
     await handleMessage(photo, deps);
 
     expect(saved[0]).toMatchObject({ total: 45900, fecha: "2026-11-03", categoria: "mercado_hogar" });
-    expect(mocks.store.finishDocument).toHaveBeenCalledWith("d1", "procesado", extraction);
+    expect(mocks.store.finishDocument).toHaveBeenCalledWith("d1", "procesado", extraction, usage);
     const [to, body, buttons] = mocks.wa.sendButtons.mock.calls[0] as unknown as [string, string, { id: string }[]];
     expect(to).toBe(member.phone);
     expect(body).toContain("Éxito");
@@ -103,6 +105,7 @@ describe("handleMessage", () => {
     await handleMessage(photo, deps);
     expect(mocks.store.saveExpense).not.toHaveBeenCalled();
     expect(mocks.store.finishDocument.mock.calls[0][1]).toBe("no_reconocido");
+    expect(mocks.store.finishDocument.mock.calls[0][3]).toEqual(usage); // el consumo se registra aunque no se haya leído nada
   });
 
   it("usa la fecha de hoy cuando el comprobante no trae fecha", async () => {

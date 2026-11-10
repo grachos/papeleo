@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import type { ExtractorPort } from "./types.js";
+import type { ExtractionResult, ExtractorPort, Usage } from "./types.js";
 
 export const CATEGORIAS = [
   "alimentacion",
@@ -55,13 +55,19 @@ export function isSupportedMime(mime: string): boolean {
   return mime === "application/pdf" || (IMAGE_TYPES as readonly string[]).includes(mime);
 }
 
+/** Lo mínimo que se usa del SDK; permite inyectar un cliente falso en las pruebas. */
+export interface ParseClient {
+  messages: { parse(params: any): Promise<any> };
+}
+
 export class ClaudeExtractor implements ExtractorPort {
-  private client = new Anthropic();
+  constructor(
+    private model: string,
+    private client: ParseClient = new Anthropic(),
+  ) {}
 
-  constructor(private model: string) {}
-
-  /** Devuelve null si el modelo no pudo producir una lectura válida. */
-  async extract(data: Buffer, mimeType: string): Promise<Extraction | null> {
+  /** `extraction` es null si el modelo no pudo producir una lectura válida; el consumo se informa siempre. */
+  async extract(data: Buffer, mimeType: string): Promise<ExtractionResult> {
     const b64 = data.toString("base64");
     const file: Anthropic.ContentBlockParam =
       mimeType === "application/pdf"
@@ -76,7 +82,13 @@ export class ClaudeExtractor implements ExtractorPort {
       output_config: { effort: "medium", format: zodOutputFormat(ExtractionSchema) },
     });
 
-    if (response.stop_reason !== "end_turn") return null;
-    return response.parsed_output ?? null;
+    const u = response.usage ?? {};
+    const usage: Usage = {
+      model: this.model,
+      tokensIn: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+      tokensOut: u.output_tokens ?? 0,
+    };
+    if (response.stop_reason !== "end_turn") return { extraction: null, usage };
+    return { extraction: response.parsed_output ?? null, usage };
   }
 }

@@ -73,7 +73,7 @@ export interface StorePort {
   claimDocument(orgId: string, memberId: string, waMessageId: string, mime: string): Promise<string | null>;
   hashExists(orgId: string, sha256: string): Promise<boolean>;
   saveFile(orgId: string, documentId: string, data: Buffer, mime: string, sha256: string): Promise<void>;
-  finishDocument(documentId: string, status: string, extraction?: Extraction): Promise<void>;
+  finishDocument(documentId: string, status: string, extraction?: Extraction, usage?: Usage): Promise<void>;
   saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense): Promise<Expense>;
   /** Marca el gasto como descartado; sin expenseId descarta el último del miembro. */
   discardExpense(memberId: string, expenseId?: string): Promise<Expense | null>;
@@ -183,8 +183,21 @@ export interface AssistantPort {
   answer(input: AssistantInput): Promise<AssistantResult>;
 }
 
+/** Tokens que cobró la API por una llamada (entrada incluye los leídos y escritos en caché). */
+export interface Usage {
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+export interface ExtractionResult {
+  /** null si el modelo no produjo una lectura válida (aun así hubo consumo). */
+  extraction: Extraction | null;
+  usage: Usage;
+}
+
 export interface ExtractorPort {
-  extract(data: Buffer, mimeType: string): Promise<Extraction | null>;
+  extract(data: Buffer, mimeType: string): Promise<ExtractionResult>;
 }
 
 export interface SheetsPort {

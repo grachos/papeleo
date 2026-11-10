@@ -50,6 +50,7 @@ beforeAll(async () => {
   await db.exec(sql("0001_init.sql"));
   await db.exec(sql("0004_query_assistant.sql"));
   await db.exec(sql("0005_harden_like_escape.sql"));
+  await db.exec(sql("0006_extraction_usage.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -154,6 +155,16 @@ describe("papeleo_listar", () => {
     const r = await listar(ORG_B, { limite: 100, desde: "2026-09-01", hasta: "2026-09-30" });
     expect(r.rows).toHaveLength(20);
     expect(Number(r.rows[0].total_filas)).toBe(25);
+  });
+});
+
+describe("consumo de la lectura (0006)", () => {
+  it("papeleo_documents guarda modelo y tokens, y los documentos viejos quedan en null", async () => {
+    const r = await db.query<any>("select extraction_model, tokens_in, tokens_out from papeleo_documents order by created_at limit 1");
+    expect(r.rows[0]).toEqual({ extraction_model: null, tokens_in: null, tokens_out: null });
+    await db.query("update papeleo_documents set extraction_model = 'claude-opus-5-5', tokens_in = 2100, tokens_out = 900 where id = (select id from papeleo_documents limit 1)");
+    const costo = await db.query<any>("select round(sum(tokens_in) * 4.0 / 1e6 + sum(tokens_out) * 20.0 / 1e6, 4) as usd from papeleo_documents where tokens_in is not null");
+    expect(Number(costo.rows[0].usd)).toBeCloseTo(0.0264, 4);
   });
 });
 
