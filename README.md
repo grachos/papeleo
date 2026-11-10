@@ -12,7 +12,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
-| Consumo (tokens) de cada lectura de factura | ✅ En código; **falta aplicar la migración `0006`** (ver «Costo real de leer facturas») |
+| Consumo (tokens) de cada lectura de factura | ✅ En vivo desde el 2026-11-10 (migración `0006` aplicada); aún sin datos hasta que se lea la próxima factura (ver «Costo real de leer facturas») |
 | Comandos `resumen`, `borrar`, `hoja` | ✅ Hecho |
 | Copia opcional de cada gasto a Google Sheets | ✅ Hecho |
 | Guardar el detalle por concepto de cada factura | ⏳ Pendiente (hoy solo hay un `descripcion` por factura) |
@@ -21,6 +21,22 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Envío de archivos por el chat (`enviar_archivos`) | ⏳ Pendiente: va después de Google Drive |
 | Base de conocimiento: el sistema aprende de las preguntas | ⏳ Pendiente (diseño en «Base de conocimiento») |
 | Despliegue en Render | ✅ En vivo desde el 2026-11-10 (canal Telegram). Primera prueba de punta a punta superada: código de acceso → recibo leído con Opus → pregunta respondida |
+
+## Punto de partida para la próxima sesión (2026-11-10, noche)
+
+El responsable del proyecto dejó todo funcionando y se fue a descansar; no se espera su respuesta hasta que vuelva.
+
+- **En vivo:** `https://papeleo.onrender.com`, commit `8a43b09`, canal Telegram con el webhook registrado. Modelos: lectura de facturas con `claude-opus-5-5` (`EXTRACTION_MODEL`); preguntas con `claude-haiku-5-5` (`QUERY_MODEL`, puesto en Render para la prueba de calidad).
+- **Base de datos (`real-samaria`):** migraciones `0001`, `0002`, `0004`, `0005` y `0006` aplicadas. La `0003` está reservada para los renglones de factura y la `0007` para la base de conocimiento.
+- **Datos de prueba hasta ahora:** 1 persona vinculada, 1 factura (un recibo de $380.000 leído con confianza «alta»), 1 pregunta respondida con 👍. Esa factura se leyó antes de la migración `0006`, así que **todavía no hay tokens de lectura registrados**.
+
+**Pendiente, en orden**
+1. Cargar 5 o 6 facturas variadas (proveedores y meses distintos, con y sin IVA, alguna borrosa, algún PDF). Con ellas se mide el **costo real de leer** (consulta del README «Costo real de leer facturas»).
+2. Hacer las 10 preguntas de la prueba de modelos, presionando 👍/👎 en cada respuesta: total, un mes puntual, categoría con más gasto, factura más cara, IVA (debe aclarar cuántas facturas lo traen), una pregunta ambigua (debe hacer una sola pregunta aclaratoria), «¿y el mes pasado?» justo después (memoria), pedir la foto de una factura (debe decir que aún no envía archivos), una con faltas de ortografía y una ajena a los gastos (debe declinar).
+3. Comparar `papeleo_query_log` (respuestas, herramientas usadas, tokens, 👍/👎) y decidir entre Haiku 5.5 y Sonnet 5.5. Criterios: no inventar cifras, resolver bien las fechas relativas, usar solo las consultas necesarias, aclarar cuando hace falta y ser honesto sobre lo que no puede hacer. Anotar el resultado en «Modelo y costo» y, si procede, cambiar el valor por defecto del código.
+4. Seguir la hoja de ruta: renglones de factura (`0003`), Google Drive, base de conocimiento (`0007`), WhatsApp.
+
+**Decisiones abiertas:** reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`); endurecimiento opcional de permisos (`revoke` del permiso por defecto de `anon` sobre las tablas `papeleo_*`); pedirle al modelo que combine consultas para gastar menos en cada pregunta.
 
 ## Arquitectura
 
@@ -84,7 +100,7 @@ Solo entra quien canjea un **código de acceso** creado por el administrador. Qu
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; **pendiente de aplicar**). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
