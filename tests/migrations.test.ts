@@ -49,6 +49,7 @@ beforeAll(async () => {
     create role anon; create role authenticated; create role service_role;`);
   await db.exec(sql("0001_init.sql"));
   await db.exec(sql("0004_query_assistant.sql"));
+  await db.exec(sql("0005_harden_like_escape.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -165,6 +166,16 @@ describe("permisos", () => {
       expect(await priv("authenticated", fn)).toBe(false);
       expect(await priv("service_role", fn)).toBe(true);
     }
+  });
+
+  it("papeleo_like_escape tiene search_path fijo y sigue escapando bien", async () => {
+    const cfg = await db.query<any>("select proconfig from pg_proc where proname = 'papeleo_like_escape'");
+    expect(cfg.rows[0].proconfig).toEqual(["search_path=\"\""]);
+    const out = await db.query<any>("select papeleo_like_escape('a%b_c\\d') as v");
+    expect(out.rows[0].v).toBe("a\\%b\\_c\\\\d");
+    // y las búsquedas que dependen de ella siguen funcionando
+    expect((await resumir(ORG_A, { proveedor: "%" })).rows).toHaveLength(0);
+    expect(Number((await resumir(ORG_A, { proveedor: "exito", moneda: "COP" })).rows[0].valor)).toBe(150000);
   });
 
   it("las funciones son SECURITY INVOKER y papeleo_query_log tiene RLS", async () => {

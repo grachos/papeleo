@@ -36,12 +36,12 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 
 ## Hoja de ruta (orden acordado)
 
-0. ✅ Migraciones `0002_access_codes.sql` y `0004_query_assistant.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10).
+0. ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10).
 1. **Render arriba**: `main` ya tiene el código; faltan las variables de entorno (README «Dónde conseguir cada dato») y probar una factura real con Opus **por Telegram**. Sin probar contra Telegram real.
 2. Extracción con conceptos + migración `0003` (`papeleo_expense_items`, `tipo_documento`, nombre de archivo).
 3. Almacenamiento en Google Drive (el usuario crea una carpeta y la comparte como editor con la cuenta de servicio).
-4. ✅ Consultas libres en lenguaje natural (capa 1) en código, con `papeleo_query_log`, 👍/👎, memoria y tope diario (incluye `campo` iva/subtotal). **Migración `0004` aplicada y verificada el 2026-11-10 en `real-samaria`** (detalle en README); falta fusionar a `main` y cargar las variables en Render. Pendiente menor: `set search_path = ''` en `papeleo_like_escape` (aviso del linter) en la próxima migración. La petición real a la API de Claude no se ha probado (sin credenciales en el entorno de desarrollo). El envío de archivos va después de Drive.
-5. Base de conocimiento: glosario por empresa, ejemplos aprobados, pantalla «Aprendizaje» en `/admin` (migración `0005`).
+4. ✅ Consultas libres en lenguaje natural (capa 1) en código, con `papeleo_query_log`, 👍/👎, memoria y tope diario (incluye `campo` iva/subtotal). **Migración `0004` aplicada y verificada el 2026-11-10 en `real-samaria`** (detalle en README); falta fusionar a `main` y cargar las variables en Render. El aviso del linter sobre `papeleo_like_escape` se corrigió con la migración `0005`. La petición real a la API de Claude no se ha probado (sin credenciales en el entorno de desarrollo). El envío de archivos va después de Drive.
+5. Base de conocimiento: glosario por empresa, ejemplos aprobados, pantalla «Aprendizaje» en `/admin` (migración `0006`).
 6. Activar WhatsApp como segundo canal cuando llegue el número (y PDF por ese canal).
 
 ## Convenciones
