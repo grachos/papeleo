@@ -1,4 +1,6 @@
 import express from "express";
+import { AttemptLimiter } from "./access.js";
+import { createAdminRouter } from "./admin.js";
 import { loadConfig } from "./config.js";
 import { ClaudeExtractor } from "./extract.js";
 import { handleMessage } from "./handler.js";
@@ -20,6 +22,7 @@ const noWhatsApp: MessengerPort = {
 const telegramClient = config.telegram ? new TelegramClient(config.telegram.botToken) : null;
 
 const deps: Deps = {
+  limiter: new AttemptLimiter(5, 60 * 60 * 1000), // 5 códigos erróneos por hora y remitente
   wa: config.whatsapp ? new WhatsAppClient(config.whatsapp) : noWhatsApp,
   tg: telegramClient ?? undefined,
   store: new SupabaseStore(config.supabase.url, config.supabase.serviceRoleKey, config.supabase.bucket),
@@ -28,6 +31,16 @@ const deps: Deps = {
 };
 
 const app = express();
+app.set("trust proxy", 1); // Render termina TLS y reenvía la IP real
+
+const store = deps.store as SupabaseStore;
+let botUsername: string | null = null;
+
+if (config.adminPassword) {
+  app.use(createAdminRouter({ store, password: config.adminPassword, botUsername: () => botUsername }));
+} else {
+  console.warn("ADMIN_PASSWORD no está definida: no hay panel de administración y nadie podrá obtener acceso.");
+}
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
@@ -72,7 +85,6 @@ if (config.whatsapp) {
 
 if (config.telegram && telegramClient) {
   const telegram = config.telegram;
-  const allowed = new Set(telegram.allowedIds);
 
   // Telegram autentica con el secreto que se le dio en setWebhook, enviado en esta cabecera.
   app.post("/telegram/webhook", express.json({ limit: "1mb" }), (req, res) => {
@@ -88,14 +100,7 @@ if (config.telegram && telegramClient) {
     const msg = parseTelegramUpdate(req.body);
     if (!msg) return;
 
-    // El bot es público: solo atienden los ids autorizados (cada foto gasta créditos de IA).
-    const id = msg.from.slice(3); // sin el prefijo «tg:»
-    if (!allowed.has(id)) {
-      telegramClient
-        .sendText(msg.from, `⛔ No estás autorizado para usar este bot.\nTu id es ${id}. Pásaselo al administrador para que te agregue.`)
-        .catch((err) => console.error("Fallo avisando a un usuario no autorizado", err));
-      return;
-    }
+    // El acceso lo decide el manejador: quien no está vinculado es ignorado en silencio.
     handleMessage(msg, deps).catch((err) => console.error("Fallo manejando el mensaje", msg.id, err));
   });
 }
@@ -103,6 +108,10 @@ if (config.telegram && telegramClient) {
 app.listen(config.port, () => {
   const canales = [config.whatsapp && "WhatsApp", config.telegram && "Telegram"].filter(Boolean).join(" + ");
   console.log(`Papeleo escuchando en el puerto ${config.port} (canales: ${canales})`);
+
+  if (telegramClient) {
+    telegramClient.getUsername().then((u) => (botUsername = u)).catch((err) => console.error("No se pudo consultar el bot de Telegram", err));
+  }
 
   // Registra el webhook de Telegram al arrancar, si se conoce la URL pública.
   if (config.telegram && telegramClient && config.telegram.publicUrl) {

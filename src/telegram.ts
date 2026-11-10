@@ -137,6 +137,12 @@ export class TelegramClient implements MessengerPort {
     await this.call("answerCallbackQuery", { callback_query_id: callbackQueryId });
   }
 
+  /** Usuario del bot (sin @), para armar enlaces de invitación. */
+  async getUsername(): Promise<string | null> {
+    const me = await this.call("getMe", {});
+    return typeof me?.username === "string" ? me.username : null;
+  }
+
   async setWebhook(url: string, secretToken: string) {
     await this.call("setWebhook", {
       url,

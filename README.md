@@ -7,7 +7,8 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Pieza | Estado |
 |---|---|
 | Webhook de WhatsApp (firma, idempotencia) | ✅ Hecho, 🕒 sin activar hasta tener el número |
-| Canal de Telegram para pruebas | ✅ Hecho (fotos, PDF, texto, botón «Descartar», lista de ids autorizados); sin probar contra Telegram real |
+| Canal de Telegram para pruebas | ✅ Hecho (fotos, PDF, texto, botón «Descartar»); sin probar contra Telegram real |
+| Control de acceso por códigos + panel `/admin` | ✅ Hecho; **falta aplicar la migración `0002` en Supabase** |
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
@@ -16,7 +17,6 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Guardar el detalle por concepto de cada factura | ⏳ Pendiente (hoy solo hay un `descripcion` por factura) |
 | Archivos en Google Drive (hoy van a Supabase Storage) | ⏳ Pendiente |
 | Consultas en lenguaje natural y envío de archivos por WhatsApp | ⏳ Pendiente |
-| Códigos de invitación para vincular números a una empresa | ⏳ Pendiente |
 | Despliegue en Render | ⚠️ Servicio creado pero caído: faltan variables de entorno |
 
 ## Arquitectura
@@ -42,7 +42,7 @@ Código en `src/`: `server.ts` (rutas y firma), `handler.ts` (lógica de mensaje
 - Ruta propia `POST /telegram/webhook`. Telegram no firma el cuerpo: autentica con el `secret_token` que se le dio en `setWebhook`, enviado en la cabecera `X-Telegram-Bot-Api-Secret-Token` (se compara en tiempo constante).
 - Idempotencia: el id del mensaje es `tg:<update_id>` (`message_id` solo es único por chat).
 - Los usuarios se guardan en `papeleo_members.phone` con el prefijo `tg:` y el id del chat (sin migración). Cuando llegue WhatsApp conviene una migración que separe `channel` y `external_id`.
-- **El bot es público** (cualquiera puede encontrarlo por su usuario y cada foto gasta créditos de IA). Por eso solo atienden los ids de `TELEGRAM_ALLOWED_IDS`; con la lista vacía nadie usa el bot y a cada desconocido se le responde su propio id para que el administrador lo agregue. Se reemplazará por códigos de invitación.
+- **El bot es público**, pero ignora en silencio a cualquiera que no esté vinculado (ver «Control de acceso»).
 - Los textos usan `*negrita*` al estilo WhatsApp; en Telegram se envían sin formato (se quitan los asteriscos).
 - Para fotos borrosas, enviarlas como *archivo* (documento): Telegram comprime las fotos.
 - El token del bot va en la URL de cada llamada a la API de Telegram: no se incluye en errores ni logs.
@@ -56,26 +56,38 @@ Código en `src/`: `server.ts` (rutas y firma), `handler.ts` (lógica de mensaje
      -d secret_token=<TELEGRAM_WEBHOOK_SECRET> \
      -d 'allowed_updates=["message","callback_query"]'
    ```
-3. Escribirle al bot: responderá «No estás autorizado» con tu id. Poner ese id en `TELEGRAM_ALLOWED_IDS` (varios, separados por coma) y volver a desplegar.
+3. Crear tu propio código en `/admin` y canjearlo en el bot (ver «Control de acceso»).
 4. **Render despliega `main`**: nada de esta rama está en vivo hasta fusionar el PR (o apuntar el servicio a la rama).
+
+### Control de acceso
+
+Solo entra quien canjea un **código de acceso** creado por el administrador. Quien no está vinculado es **ignorado en silencio**: no recibe respuesta, no se gastan créditos de IA y nunca se le muestra su id.
+
+- **Códigos:** formato `XXXX-XXXX-XXXX` (12 caracteres aleatorios, ~59 bits, sin `I L O 0 1`). **Un solo uso y sin vencimiento.** Solo el administrador los revoca. En la base se guarda únicamente su hash (sha256); el código en claro se muestra una vez al crearlo.
+- **Canje:** la persona le escribe el código al bot, o abre el enlace `https://t.me/<bot>?start=CODIGO`. Se canjea en una transacción atómica (función SQL `papeleo_redeem_code`): dos personas no pueden usar el mismo código. Quedan vinculadas a la empresa del código.
+- **Límite de intentos:** 5 códigos erróneos por hora y remitente; después ni se consulta la base. Los mensajes que no tienen forma de código no cuentan.
+- **Quitar acceso:** el administrador revoca a la persona (`revoked_at`); desde ese momento es ignorada. Si luego recibe un código nuevo, se reactiva.
+- **Varias personas por empresa:** se crea un código por persona, eligiendo la misma empresa.
+
+**Panel de administración** (`https://papeleo.onrender.com/admin`, en el mismo servicio): entra con `ADMIN_PASSWORD` (mínimo 12 caracteres). Permite crear códigos (empresa nueva o existente, y una nota), revocar códigos sin usar y quitar el acceso a personas ya vinculadas. Sesión de 8 h en cookie `HttpOnly` + `SameSite=Strict` + token CSRF en cada acción; 5 intentos de contraseña fallidos bloquean la IP 15 minutos; todo lo que viene de la base se escapa en el HTML. Sin `ADMIN_PASSWORD` el panel no existe.
 
 ### Base de datos (Supabase)
 
-Migración: `supabase/migrations/0001_init.sql`. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base) y `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje). Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
-- `papeleo_members`: personas, identificadas por su teléfono de WhatsApp (único).
+- `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
+- `papeleo_access_codes`: códigos de acceso (hash, empresa, nota, estado `activo`/`usado`/`revocado`).
 - `papeleo_documents`: archivo recibido (`wa_message_id` único, `sha256`, estado, extracción en JSON).
 - `papeleo_expenses`: gasto registrado (fecha, proveedor, NIT, nº de factura, subtotal, IVA, total, categoría, medio de pago, confianza, estado).
 
 ## Hoja de ruta (en este orden)
 
 1. **Render arriba y una factura real probada, por Telegram.** Cargar las variables de entorno y validar la lectura con Opus.
-2. **Detalle por concepto.** La extracción devuelve cada renglón (descripción, cantidad, valor unitario, valor de la línea); tabla nueva `papeleo_expense_items` (migración `0002`). Si la suma de renglones no coincide con el total, la factura se marca «revisar».
+2. **Detalle por concepto.** La extracción devuelve cada renglón (descripción, cantidad, valor unitario, valor de la línea); tabla nueva `papeleo_expense_items` (migración `0003`). Si la suma de renglones no coincide con el total, la factura se marca «revisar».
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por WhatsApp.
 4. **Consultas en lenguaje natural** con herramientas (ver abajo) y envío de los archivos por WhatsApp.
 5. **Activar WhatsApp** cuando llegue el número: cargar las variables `WHATSAPP_*`, apuntar el webhook y (migración) separar `channel` y `external_id` en `papeleo_members`. 
-6. **Códigos de invitación**: un código por persona para vincular su número a una empresa. Hoy un número nuevo se da de alta automáticamente, lo cual no sirve cuando hay archivos de por medio.
 
 ### Consultas en lenguaje natural
 
@@ -118,7 +130,7 @@ Copia `.env.example` a `.env` y completa los valores.
 | `PORT` | Puerto (Render lo define solo) |
 | `TELEGRAM_BOT_TOKEN` | Activa el canal de Telegram (lo da @BotFather) |
 | `TELEGRAM_WEBHOOK_SECRET` | Secreto del webhook: solo `A-Z a-z 0-9 _ -` |
-| `TELEGRAM_ALLOWED_IDS` | Ids de Telegram autorizados, separados por coma |
+| `ADMIN_PASSWORD` | Contraseña del panel `/admin` (mín. 12 caracteres). Sin ella no hay panel |
 | `PUBLIC_URL` | Opcional; por defecto `RENDER_EXTERNAL_URL`. Con ella se registra solo el webhook |
 | `WHATSAPP_VERIFY_TOKEN` | (Pendiente) Texto propio; se pega igual en el webhook de Meta |
 | `WHATSAPP_APP_SECRET` | (Pendiente) App Secret de la app de Meta (valida la firma) |

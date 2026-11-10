@@ -35,15 +35,16 @@ export function loadConfig() {
     ? {
         botToken: required("TELEGRAM_BOT_TOKEN"),
         webhookSecret: telegramSecret(required("TELEGRAM_WEBHOOK_SECRET")),
-        // Ids de Telegram autorizados a usar el bot. Vacío = nadie (el bot solo responde su id al desconocido).
-        allowedIds: (process.env.TELEGRAM_ALLOWED_IDS ?? "")
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean),
         // Si se define, el servidor registra solo el webhook al arrancar. Render aporta RENDER_EXTERNAL_URL.
         publicUrl: process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? null,
       }
     : null;
+
+  // Panel de administración (crea los códigos de acceso). Sin contraseña no hay panel y nadie puede entrar.
+  const adminPassword = process.env.ADMIN_PASSWORD || null;
+  if (adminPassword && adminPassword.length < 12) {
+    throw new Error("ADMIN_PASSWORD debe tener al menos 12 caracteres");
+  }
 
   if (!whatsapp && !telegram) {
     throw new Error("Configura al menos un canal: variables WHATSAPP_* o TELEGRAM_BOT_TOKEN");
@@ -53,6 +54,7 @@ export function loadConfig() {
     port: Number(process.env.PORT ?? 3000),
     whatsapp,
     telegram,
+    adminPassword,
     supabase: {
       url: required("SUPABASE_URL"),
       serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),

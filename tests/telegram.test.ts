@@ -123,7 +123,7 @@ describe("loadConfig", () => {
   const base = { SUPABASE_URL: "u", SUPABASE_SERVICE_ROLE_KEY: "k" };
   const withEnv = (env: Record<string, string>) => {
     vi.unstubAllEnvs();
-    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_ALLOWED_IDS"]) {
+    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_PASSWORD"]) {
       vi.stubEnv(k, "");
     }
     for (const [k, v] of Object.entries({ ...base, ...env })) vi.stubEnv(k, v);
@@ -131,10 +131,17 @@ describe("loadConfig", () => {
   };
   afterEach(() => vi.unstubAllEnvs());
 
-  it("arranca solo con Telegram y lee los ids autorizados", () => {
-    const c = withEnv({ TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1", TELEGRAM_ALLOWED_IDS: "42, 77" });
+  it("arranca solo con Telegram", () => {
+    const c = withEnv({ TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" });
     expect(c.whatsapp).toBeNull();
-    expect(c.telegram?.allowedIds).toEqual(["42", "77"]);
+    expect(c.telegram?.botToken).toBe("t");
+    expect(c.adminPassword).toBeNull();
+  });
+
+  it("exige una contraseña de administrador de al menos 12 caracteres", () => {
+    const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
+    expect(() => withEnv({ ...tg, ADMIN_PASSWORD: "corta" })).toThrow("ADMIN_PASSWORD");
+    expect(withEnv({ ...tg, ADMIN_PASSWORD: "una-clave-larga-123" }).adminPassword).toBe("una-clave-larga-123");
   });
 
   it("exige al menos un canal y un secreto válido", () => {
@@ -149,7 +156,7 @@ describe("handleMessage por canal", () => {
   const org = { id: "o1", name: "Ana", sheet_id: null };
   const mk = () => ({ sendText: vi.fn(async () => {}), sendButtons: vi.fn(async () => {}), downloadMedia: vi.fn() });
   const store = {
-    findOrCreateMember: vi.fn(async () => ({ member, org, isNew: false })),
+    findMember: vi.fn(async () => ({ member, org })),
     listExpenses: vi.fn(async () => []),
   };
   const msg = (text: string): IncomingMessage => ({ id: "tg:1", channel: "telegram", from: "tg:42", senderName: "Ana", kind: "text", text });

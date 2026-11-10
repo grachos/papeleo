@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Extraction } from "./extract.js";
-import type { Expense, Member, NewExpense, Org, StorePort } from "./types.js";
+import { generateCode, hashCode, normalizeCode } from "./access.js";
+import type { AdminCode, AdminMember, AdminPort, Expense, Member, NewExpense, Org, StorePort } from "./types.js";
 
 const EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -18,48 +19,100 @@ function toExpense(row: any): Expense {
   return { ...row, subtotal: num(row.subtotal), iva: num(row.iva), total: Number(row.total) };
 }
 
-export class SupabaseStore implements StorePort {
+export class SupabaseStore implements StorePort, AdminPort {
   private db: SupabaseClient;
 
   constructor(url: string, serviceRoleKey: string, private bucket: string) {
     this.db = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
   }
 
-  async findOrCreateMember(
-    phone: string,
-    name: string | null,
-  ): Promise<{ member: Member; org: Org; isNew: boolean }> {
+  async findMember(phone: string): Promise<{ member: Member; org: Org } | null> {
     const found = await this.db
       .from("papeleo_members")
       .select("id, org_id, phone, name, organization:papeleo_organizations(id, name, sheet_id)")
       .eq("phone", phone)
+      .is("revoked_at", null)
       .maybeSingle();
     if (found.error) throw found.error;
-    if (found.data) {
-      const { organization, ...member } = found.data as any;
-      return { member: member as Member, org: organization as Org, isNew: false };
+    if (!found.data) return null;
+    const { organization, ...member } = found.data as any;
+    return { member: member as Member, org: organization as Org };
+  }
+
+  async redeemCode(code: string, phone: string, name: string | null) {
+    const res = await this.db.rpc("papeleo_redeem_code", { p_hash: hashCode(code), p_phone: phone, p_name: name });
+    // «ya_vinculado»: carrera con otro mensaje del mismo usuario; el canje se revirtió.
+    if (res.error?.message?.includes("ya_vinculado")) return null;
+    if (res.error) throw res.error;
+    const row = (res.data as any[] | null)?.[0];
+    if (!row) return null;
+    return {
+      member: { id: row.r_member_id, org_id: row.r_org_id, phone, name },
+      org: { id: row.r_org_id, name: row.r_org_name, sheet_id: row.r_sheet_id },
+    };
+  }
+
+  // --- Panel de administración ---
+
+  async listOrgs() {
+    const res = await this.db.from("papeleo_organizations").select("id, name").order("name");
+    if (res.error) throw res.error;
+    return res.data as { id: string; name: string }[];
+  }
+
+  async createCode(input: { orgId?: string; newOrgName?: string; note?: string }) {
+    let orgId = input.orgId;
+    let createdOrg = false;
+    if (!orgId) {
+      const name = input.newOrgName?.trim();
+      if (!name) throw new Error("Falta el nombre de la empresa");
+      const org = await this.db.from("papeleo_organizations").insert({ name }).select("id").single();
+      if (org.error) throw org.error;
+      orgId = org.data.id as string;
+      createdOrg = true;
     }
-
-    // Número desconocido: se le crea su propia organización (registro autoservicio).
-    const org = await this.db
-      .from("papeleo_organizations")
-      .insert({ name: name ?? phone })
-      .select("id, name, sheet_id")
+    const code = generateCode();
+    const ins = await this.db
+      .from("papeleo_access_codes")
+      .insert({ org_id: orgId, code_hash: hashCode(normalizeCode(code)!), note: input.note?.trim() || null })
+      .select("org:papeleo_organizations(name)")
       .single();
-    if (org.error) throw org.error;
+    if (ins.error) {
+      if (createdOrg) await this.db.from("papeleo_organizations").delete().eq("id", orgId);
+      throw ins.error;
+    }
+    return { code, orgName: (ins.data as any).org.name as string };
+  }
 
-    const member = await this.db
+  async listCodes() {
+    const res = await this.db
+      .from("papeleo_access_codes")
+      .select("id, note, status, created_at, used_at, org:papeleo_organizations(name)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (res.error) throw res.error;
+    return (res.data as any[]).map(({ org, ...c }) => ({ ...c, org_name: org?.name ?? "" })) as AdminCode[];
+  }
+
+  async revokeCode(id: string) {
+    // Solo se revoca un código que aún no se usó; para quitar a alguien ya vinculado se revoca su acceso.
+    const res = await this.db.from("papeleo_access_codes").update({ status: "revocado" }).eq("id", id).eq("status", "activo");
+    if (res.error) throw res.error;
+  }
+
+  async listMembers() {
+    const res = await this.db
       .from("papeleo_members")
-      .insert({ org_id: org.data.id, phone, name })
-      .select("id, org_id, phone, name")
-      .single();
-    if (member.error) {
-      await this.db.from("papeleo_organizations").delete().eq("id", org.data.id);
-      // Dos mensajes simultáneos del mismo número nuevo: el otro ganó, se reutiliza.
-      if (member.error.code === "23505") return this.findOrCreateMember(phone, name);
-      throw member.error;
-    }
-    return { member: member.data as Member, org: org.data as Org, isNew: true };
+      .select("id, name, phone, created_at, revoked_at, org:papeleo_organizations(name)")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (res.error) throw res.error;
+    return (res.data as any[]).map(({ org, ...m }) => ({ ...m, org_name: org?.name ?? "" })) as AdminMember[];
+  }
+
+  async revokeMember(id: string) {
+    const res = await this.db.from("papeleo_members").update({ revoked_at: new Date().toISOString() }).eq("id", id).is("revoked_at", null);
+    if (res.error) throw res.error;
   }
 
   async claimDocument(orgId: string, memberId: string, waMessageId: string, mime: string) {

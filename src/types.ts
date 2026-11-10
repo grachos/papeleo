@@ -65,10 +65,10 @@ export interface MessengerPort {
 export type WhatsAppPort = MessengerPort;
 
 export interface StorePort {
-  findOrCreateMember(
-    phone: string,
-    name: string | null,
-  ): Promise<{ member: Member; org: Org; isNew: boolean }>;
+  /** Miembro vinculado y no revocado; null si no existe o se le quitó el acceso. */
+  findMember(phone: string): Promise<{ member: Member; org: Org } | null>;
+  /** Canjea un código (ya normalizado) por acceso. Null si no existe, ya se usó o fue revocado. */
+  redeemCode(code: string, phone: string, name: string | null): Promise<{ member: Member; org: Org } | null>;
   /** Devuelve null si ese mensaje de WhatsApp ya se había recibido. */
   claimDocument(orgId: string, memberId: string, waMessageId: string, mime: string): Promise<string | null>;
   hashExists(orgId: string, sha256: string): Promise<boolean>;
@@ -79,6 +79,35 @@ export interface StorePort {
   discardExpense(memberId: string, expenseId?: string): Promise<Expense | null>;
   listExpenses(orgId: string, from: string, to: string): Promise<Expense[]>;
   setSheet(orgId: string, sheetId: string): Promise<void>;
+}
+
+export interface AdminCode {
+  id: string;
+  note: string | null;
+  org_name: string;
+  status: "activo" | "usado" | "revocado";
+  created_at: string;
+  used_at: string | null;
+}
+
+export interface AdminMember {
+  id: string;
+  name: string | null;
+  phone: string;
+  org_name: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+/** Operaciones del panel de administración. */
+export interface AdminPort {
+  listOrgs(): Promise<{ id: string; name: string }[]>;
+  /** Crea el código (y la empresa si se da `newOrgName`). El código en claro solo se devuelve aquí. */
+  createCode(input: { orgId?: string; newOrgName?: string; note?: string }): Promise<{ code: string; orgName: string }>;
+  listCodes(): Promise<AdminCode[]>;
+  revokeCode(id: string): Promise<void>;
+  listMembers(): Promise<AdminMember[]>;
+  revokeMember(id: string): Promise<void>;
 }
 
 export interface ExtractorPort {
@@ -100,4 +129,6 @@ export interface Deps {
   extractor: ExtractorPort;
   sheets: SheetsPort;
   today?: () => string;
+  /** Límite de intentos de canje fallidos por remitente (opcional). */
+  limiter?: { allowed(key: string): boolean; fail(key: string): void; reset(key: string): void };
 }
