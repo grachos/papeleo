@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { extractCode } from "./access.js";
 import { isSupportedMime } from "./extract.js";
 import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
@@ -7,12 +8,20 @@ import type { Deps, IncomingMessage, Member, Org } from "./types.js";
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
 
-export async function handleMessage(msg: IncomingMessage, deps: Deps): Promise<void> {
-  const { member, org, isNew } = await deps.store.findOrCreateMember(msg.from, msg.senderName);
-  if (isNew) {
-    await deps.wa.sendText(msg.from, `👋 Hola${member.name ? `, ${member.name}` : ""}. Soy tu asistente de gastos.\n\n${HELP}`);
-    if (msg.kind === "text") return;
+export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promise<void> {
+  // Cada mensaje se responde por el mismo canal por el que llegó.
+  let deps = allDeps;
+  if (msg.channel === "telegram") {
+    if (!allDeps.tg) throw new Error("Llegó un mensaje de Telegram pero el canal no está configurado");
+    deps = { ...allDeps, wa: allDeps.tg };
   }
+  const found = await deps.store.findMember(msg.from);
+  if (!found) {
+    // Sin acceso: solo se atiende un mensaje que traiga un código válido; todo lo demás se ignora en silencio.
+    if (msg.kind === "text") await tryRedeem(msg, deps);
+    return;
+  }
+  const { member, org } = found;
 
   switch (msg.kind) {
     case "media":
@@ -29,8 +38,23 @@ export async function handleMessage(msg: IncomingMessage, deps: Deps): Promise<v
   }
 }
 
+async function tryRedeem(msg: IncomingMessage, deps: Deps): Promise<void> {
+  const code = extractCode(msg.text ?? "");
+  if (!code || (deps.limiter && !deps.limiter.allowed(msg.from))) return;
+
+  const joined = await deps.store.redeemCode(code, msg.from, msg.senderName);
+  if (!joined) {
+    deps.limiter?.fail(msg.from);
+    return; // código inexistente, usado o revocado: sin respuesta
+  }
+  deps.limiter?.reset(msg.from);
+  const hello = joined.member.name ? `, ${joined.member.name}` : "";
+  await deps.wa.sendText(msg.from, `✅ Listo${hello}. Quedaste vinculado a ${joined.org.name}.\n\n${HELP}`);
+}
+
 async function handleText(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
-  const command = text.trim().toLowerCase();
+  // En Telegram los comandos llegan como «/resumen» o «/resumen@mi_bot».
+  const command = text.trim().toLowerCase().replace(/^\/([a-z_]+)(@\w+)?/, "$1");
 
   if (command === "resumen") {
     const today = (deps.today ?? todayBogota)();

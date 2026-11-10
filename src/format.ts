@@ -49,6 +49,7 @@ export function summaryMessage(expenses: Expense[], month: string): string {
 
 export const HELP = [
   "Envíame la *foto o el PDF* de una factura, tiquete o recibo y lo registro.",
+  "Si la foto sale borrosa, envíala como *archivo* (documento) para que no se comprima.",
   "",
   "También puedes escribir:",
   "• *resumen*: total del mes por categoría",

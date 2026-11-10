@@ -36,11 +36,8 @@ function makeDeps(over: { extraction?: Extraction | null; sheetId?: string | nul
       downloadMedia: vi.fn(async () => ({ data: Buffer.from("img"), mimeType: "image/jpeg" })),
     },
     store: {
-      findOrCreateMember: vi.fn(async () => ({
-        member,
-        org: { ...org, sheet_id: over.sheetId ?? null },
-        isNew: false,
-      })),
+      findMember: vi.fn(async () => ({ member, org: { ...org, sheet_id: over.sheetId ?? null } })),
+      redeemCode: vi.fn(async () => null),
       claimDocument: vi.fn(async () => "d1" as string | null),
       hashExists: vi.fn(async () => false),
       saveFile: vi.fn(async () => {}),
