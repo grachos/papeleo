@@ -11,6 +11,14 @@ const WHATSAPP_VARS = [
   "WHATSAPP_PHONE_NUMBER_ID",
 ];
 
+/** Telegram solo admite A-Z a-z 0-9 _ - (1 a 256 caracteres) en el secreto del webhook. */
+function telegramSecret(value: string): string {
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(value)) {
+    throw new Error("TELEGRAM_WEBHOOK_SECRET solo puede tener letras, números, _ y - (máx. 256 caracteres)");
+  }
+  return value;
+}
+
 export function loadConfig() {
   // Cada canal es opcional, pero debe haber al menos uno. Si se define alguna variable de un canal, hacen falta todas las suyas.
   const whatsapp = WHATSAPP_VARS.some((v) => process.env[v])
@@ -23,24 +31,28 @@ export function loadConfig() {
       }
     : null;
 
-  const instagram = process.env.INSTAGRAM_ACCESS_TOKEN
+  const telegram = process.env.TELEGRAM_BOT_TOKEN
     ? {
-        accessToken: required("INSTAGRAM_ACCESS_TOKEN"),
-        // Pueden reutilizar los de WhatsApp si es la misma app de Meta.
-        verifyToken: process.env.INSTAGRAM_VERIFY_TOKEN ?? required("WHATSAPP_VERIFY_TOKEN"),
-        appSecret: process.env.INSTAGRAM_APP_SECRET ?? required("WHATSAPP_APP_SECRET"),
-        graphVersion: process.env.INSTAGRAM_GRAPH_VERSION ?? "v21.0",
+        botToken: required("TELEGRAM_BOT_TOKEN"),
+        webhookSecret: telegramSecret(required("TELEGRAM_WEBHOOK_SECRET")),
+        // Ids de Telegram autorizados a usar el bot. Vacío = nadie (el bot solo responde su id al desconocido).
+        allowedIds: (process.env.TELEGRAM_ALLOWED_IDS ?? "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean),
+        // Si se define, el servidor registra solo el webhook al arrancar. Render aporta RENDER_EXTERNAL_URL.
+        publicUrl: process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? null,
       }
     : null;
 
-  if (!whatsapp && !instagram) {
-    throw new Error("Configura al menos un canal: variables WHATSAPP_* o INSTAGRAM_ACCESS_TOKEN");
+  if (!whatsapp && !telegram) {
+    throw new Error("Configura al menos un canal: variables WHATSAPP_* o TELEGRAM_BOT_TOKEN");
   }
 
   return {
     port: Number(process.env.PORT ?? 3000),
     whatsapp,
-    instagram,
+    telegram,
     supabase: {
       url: required("SUPABASE_URL"),
       serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),

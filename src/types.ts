@@ -31,11 +31,11 @@ export interface Expense {
 
 export type NewExpense = Omit<Expense, "id">;
 
-export type Channel = "whatsapp" | "instagram";
+export type Channel = "whatsapp" | "telegram";
 
 /**
  * Mensaje entrante ya normalizado desde el webhook del canal.
- * `from` identifica al remitente: teléfono en WhatsApp; en Instagram, el id del usuario con prefijo `ig:`.
+ * `from` identifica al remitente: teléfono en WhatsApp; en Telegram, el id del chat con prefijo `tg:`.
  */
 export interface IncomingMessage {
   id: string;
@@ -44,7 +44,7 @@ export interface IncomingMessage {
   senderName: string | null;
   kind: "text" | "media" | "button" | "other";
   text?: string;
-  /** WhatsApp: id del medio. Instagram: URL del adjunto. */
+  /** Id del archivo en el canal (WhatsApp: id del medio; Telegram: file_id). */
   mediaId?: string;
   mimeType?: string;
   buttonId?: string;
@@ -55,7 +55,7 @@ export interface Button {
   title: string;
 }
 
-/** Canal de mensajería (WhatsApp o Instagram). */
+/** Canal de mensajería (WhatsApp o Telegram). */
 export interface MessengerPort {
   sendText(to: string, body: string): Promise<void>;
   sendButtons(to: string, body: string, buttons: Button[]): Promise<void>;
@@ -94,8 +94,8 @@ export interface SheetsPort {
 export interface Deps {
   /** Canal de WhatsApp (el de por defecto). */
   wa: MessengerPort;
-  /** Canal de Instagram, si está configurado. */
-  ig?: MessengerPort;
+  /** Canal de Telegram, si está configurado. */
+  tg?: MessengerPort;
   store: StorePort;
   extractor: ExtractorPort;
   sheets: SheetsPort;

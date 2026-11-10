@@ -1,13 +1,13 @@
 # Papeleo
 
-Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas y comprobantes; el servicio los lee con IA (Claude Opus, incluso si están borrosos), los registra en una base de datos y, más adelante, permite consultarlos en lenguaje natural desde el mismo chat. **El chat es el front** (no hay aplicación web). Canales: **Instagram (DM) activo para pruebas** y **WhatsApp, destino final, pendiente hasta tener el número de teléfono**.
+Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas y comprobantes; el servicio los lee con IA (Claude Opus, incluso si están borrosos), los registra en una base de datos y, más adelante, permite consultarlos en lenguaje natural desde el mismo chat. **El chat es el front** (no hay aplicación web). Canales: **Telegram activo para pruebas** y **WhatsApp, destino final, pendiente hasta tener el número de teléfono**.
 
 ## Estado actual
 
 | Pieza | Estado |
 |---|---|
 | Webhook de WhatsApp (firma, idempotencia) | ✅ Hecho, 🕒 sin activar hasta tener el número |
-| Canal de Instagram (DM) para pruebas | ✅ Hecho (fotos, texto y «Descartar» como respuesta rápida); sin probar contra Meta real |
+| Canal de Telegram para pruebas | ✅ Hecho (fotos, PDF, texto, botón «Descartar», lista de ids autorizados); sin probar contra Telegram real |
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
@@ -22,8 +22,8 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 ## Arquitectura
 
 ```
-Instagram / WhatsApp ──► POST /webhook (Express, Render)
-        (se distingue por body.object; la respuesta sale por el mismo canal)
+Telegram ──► POST /telegram/webhook ─┐   (Express, Render; la respuesta sale
+WhatsApp ──► POST /webhook ──────────┘    por el mismo canal por el que llegó)
                  │
                  ├─ descarga el archivo (Graph API)
                  ├─ sha256 → ¿duplicado? → responde y termina
@@ -34,24 +34,30 @@ Instagram / WhatsApp ──► POST /webhook (Express, Render)
                  └─ responde por WhatsApp con botón «Descartar»
 ```
 
-Código en `src/`: `server.ts` (rutas y firma), `handler.ts` (lógica de mensajes, independiente del canal), `extract.ts` (lectura con IA), `store.ts` (Supabase), `whatsapp.ts` y `instagram.ts` (adaptadores de canal), `sheets.ts` (Google Sheets), `format.ts`, `config.ts`, `types.ts`. Tests en `tests/`.
+Código en `src/`: `server.ts` (rutas y firma), `handler.ts` (lógica de mensajes, independiente del canal), `extract.ts` (lectura con IA), `store.ts` (Supabase), `whatsapp.ts` y `telegram.ts` (adaptadores de canal), `sheets.ts` (Google Sheets), `format.ts`, `config.ts`, `types.ts`. Tests en `tests/`.
 
-### Canal de Instagram (temporal)
+### Canal de Telegram (temporal)
 
-- Los usuarios de Instagram se identifican con su id de Instagram guardado en `papeleo_members.phone` con el prefijo `ig:` (sin migración). Cuando llegue WhatsApp conviene una migración que separe `channel` y `external_id`.
-- Solo **imágenes**: Instagram no permite enviar PDF por DM. Los PDF quedan para WhatsApp.
-- Sin botones: «Descartar» se envía como respuesta rápida (título máx. 20 caracteres). Los textos se parten en trozos de ≤900 caracteres (límite de Instagram).
-- Solo se descargan adjuntos desde los CDN de Meta (`fbcdn.net`, `cdninstagram.com`, `fbsbx.com`).
-- Mientras la app de Meta esté en modo desarrollo, solo pueden escribir cuentas con rol en la app (administradores, desarrolladores, probadores). No hace falta App Review para probar.
-- Solo se puede responder dentro de las 24 h siguientes al último mensaje del usuario.
-- El nombre del usuario no viene en el webhook; la empresa se crea con el id como nombre.
+- Es un bot normal de Telegram (sin Meta ni App Review). Acepta **fotos y PDF**, comandos (`/resumen`, `/borrar`, `/hoja`) y el botón «Descartar» como teclado en línea. Los textos se parten en trozos de ≤4000 caracteres.
+- Ruta propia `POST /telegram/webhook`. Telegram no firma el cuerpo: autentica con el `secret_token` que se le dio en `setWebhook`, enviado en la cabecera `X-Telegram-Bot-Api-Secret-Token` (se compara en tiempo constante).
+- Idempotencia: el id del mensaje es `tg:<update_id>` (`message_id` solo es único por chat).
+- Los usuarios se guardan en `papeleo_members.phone` con el prefijo `tg:` y el id del chat (sin migración). Cuando llegue WhatsApp conviene una migración que separe `channel` y `external_id`.
+- **El bot es público** (cualquiera puede encontrarlo por su usuario y cada foto gasta créditos de IA). Por eso solo atienden los ids de `TELEGRAM_ALLOWED_IDS`; con la lista vacía nadie usa el bot y a cada desconocido se le responde su propio id para que el administrador lo agregue. Se reemplazará por códigos de invitación.
+- Los textos usan `*negrita*` al estilo WhatsApp; en Telegram se envían sin formato (se quitan los asteriscos).
+- Para fotos borrosas, enviarlas como *archivo* (documento): Telegram comprime las fotos.
+- El token del bot va en la URL de cada llamada a la API de Telegram: no se incluye en errores ni logs.
 
-**Activarlo (lo hace el dueño de la cuenta):**
-1. La cuenta de Instagram debe ser **profesional** (empresa o creador).
-2. En developers.facebook.com, crear/usar una app con el producto «Instagram» (API de mensajería) y conectar esa cuenta; generar el token.
-3. Webhook: URL `https://papeleo.onrender.com/webhook`, token de verificación igual a `INSTAGRAM_VERIFY_TOKEN`, suscribir el campo `messages`.
-4. Añadir como probadores las cuentas que escribirán.
-5. Cargar en Render `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_VERIFY_TOKEN` y las variables de Supabase y Anthropic.
+**Activarlo:**
+1. En Telegram, hablar con **@BotFather** → `/newbot` → copiar el token.
+2. Cargar en Render: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (inventado: letras, números, `_`, `-`), más las variables de Supabase y Anthropic. Si Render define `RENDER_EXTERNAL_URL`, el servidor registra solo el webhook al arrancar; si no, hacerlo a mano:
+   ```bash
+   curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+     -d url=https://papeleo.onrender.com/telegram/webhook \
+     -d secret_token=<TELEGRAM_WEBHOOK_SECRET> \
+     -d 'allowed_updates=["message","callback_query"]'
+   ```
+3. Escribirle al bot: responderá «No estás autorizado» con tu id. Poner ese id en `TELEGRAM_ALLOWED_IDS` (varios, separados por coma) y volver a desplegar.
+4. **Render despliega `main`**: nada de esta rama está en vivo hasta fusionar el PR (o apuntar el servicio a la rama).
 
 ### Base de datos (Supabase)
 
@@ -64,11 +70,11 @@ Migración: `supabase/migrations/0001_init.sql`. Todas las tablas, índices y el
 
 ## Hoja de ruta (en este orden)
 
-1. **Render arriba y una factura real probada, por Instagram.** Cargar las variables de entorno y validar la lectura con Opus.
+1. **Render arriba y una factura real probada, por Telegram.** Cargar las variables de entorno y validar la lectura con Opus.
 2. **Detalle por concepto.** La extracción devuelve cada renglón (descripción, cantidad, valor unitario, valor de la línea); tabla nueva `papeleo_expense_items` (migración `0002`). Si la suma de renglones no coincide con el total, la factura se marca «revisar».
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por WhatsApp.
 4. **Consultas en lenguaje natural** con herramientas (ver abajo) y envío de los archivos por WhatsApp.
-5. **Activar WhatsApp** cuando llegue el número: cargar las variables `WHATSAPP_*`, apuntar el webhook y (migración) separar `channel` y `external_id` en `papeleo_members`. Habilita además los PDF.
+5. **Activar WhatsApp** cuando llegue el número: cargar las variables `WHATSAPP_*`, apuntar el webhook y (migración) separar `channel` y `external_id` en `papeleo_members`. 
 6. **Códigos de invitación**: un código por persona para vincular su número a una empresa. Hoy un número nuevo se da de alta automáticamente, lo cual no sirve cuando hay archivos de por medio.
 
 ### Consultas en lenguaje natural
@@ -110,9 +116,10 @@ Copia `.env.example` a `.env` y completa los valores.
 | Variable | Uso |
 |---|---|
 | `PORT` | Puerto (Render lo define solo) |
-| `INSTAGRAM_ACCESS_TOKEN` | Activa el canal de Instagram |
-| `INSTAGRAM_APP_SECRET`, `INSTAGRAM_VERIFY_TOKEN` | Firma y verificación del webhook; si faltan, se usan los de WhatsApp |
-| `INSTAGRAM_GRAPH_VERSION` | Por defecto `v21.0` |
+| `TELEGRAM_BOT_TOKEN` | Activa el canal de Telegram (lo da @BotFather) |
+| `TELEGRAM_WEBHOOK_SECRET` | Secreto del webhook: solo `A-Z a-z 0-9 _ -` |
+| `TELEGRAM_ALLOWED_IDS` | Ids de Telegram autorizados, separados por coma |
+| `PUBLIC_URL` | Opcional; por defecto `RENDER_EXTERNAL_URL`. Con ella se registra solo el webhook |
 | `WHATSAPP_VERIFY_TOKEN` | (Pendiente) Texto propio; se pega igual en el webhook de Meta |
 | `WHATSAPP_APP_SECRET` | (Pendiente) App Secret de la app de Meta (valida la firma) |
 | `WHATSAPP_ACCESS_TOKEN` | (Pendiente) Token de usuario del sistema |
@@ -133,8 +140,8 @@ Servicio web `papeleo` (plan free, región Virginia) conectado a la rama `main` 
 - Build: `npm ci --include=dev && npm run build`
 - Start: `npm start`
 - URL: `https://papeleo.onrender.com` · health check: `GET /health`
-- Webhook de Meta (Instagram y WhatsApp): `https://papeleo.onrender.com/webhook`
+- Webhooks: WhatsApp `https://papeleo.onrender.com/webhook`, Telegram `https://papeleo.onrender.com/telegram/webhook`
 
-**Estado al 2026-11-10:** el único despliegue falló al arrancar con `Falta la variable de entorno WHATSAPP_APP_SECRET`: no hay variables cargadas en Render. Además corrió con Node 26, antes de fijar Node 22 (`engines`). Hay que cargar las variables (al menos Supabase, Anthropic y un canal) y volver a desplegar `main`. Con el canal de Instagram ya no se exigen las de WhatsApp.
+**Estado al 2026-11-10:** el único despliegue falló al arrancar con `Falta la variable de entorno WHATSAPP_APP_SECRET`: no hay variables cargadas en Render. Además corrió con Node 26, antes de fijar Node 22 (`engines`). Hay que cargar las variables (al menos Supabase, Anthropic y un canal) y volver a desplegar `main`. Con Telegram ya no se exigen las de WhatsApp.
 
 Nota: el plan free de Render duerme el servicio tras un rato sin tráfico; el primer mensaje de WhatsApp después de eso puede tardar en responder. Considerar un plan de pago antes de usarlo en producción.

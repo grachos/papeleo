@@ -10,9 +10,9 @@ const DISCARD_PREFIX = "descartar:";
 export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promise<void> {
   // Cada mensaje se responde por el mismo canal por el que llegó.
   let deps = allDeps;
-  if (msg.channel === "instagram") {
-    if (!allDeps.ig) throw new Error("Llegó un mensaje de Instagram pero el canal no está configurado");
-    deps = { ...allDeps, wa: allDeps.ig };
+  if (msg.channel === "telegram") {
+    if (!allDeps.tg) throw new Error("Llegó un mensaje de Telegram pero el canal no está configurado");
+    deps = { ...allDeps, wa: allDeps.tg };
   }
   const { member, org, isNew } = await deps.store.findOrCreateMember(msg.from, msg.senderName);
   if (isNew) {
@@ -36,7 +36,8 @@ export async function handleMessage(msg: IncomingMessage, allDeps: Deps): Promis
 }
 
 async function handleText(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
-  const command = text.trim().toLowerCase();
+  // En Telegram los comandos llegan como «/resumen» o «/resumen@mi_bot».
+  const command = text.trim().toLowerCase().replace(/^\/([a-z_]+)(@\w+)?/, "$1");
 
   if (command === "resumen") {
     const today = (deps.today ?? todayBogota)();
