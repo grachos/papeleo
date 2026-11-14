@@ -38,6 +38,22 @@ El responsable del proyecto dejó todo funcionando el 2026-11-10 y volvió el 20
 
 **Decisiones abiertas:** reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`); endurecimiento opcional de permisos (`revoke` del permiso por defecto de `anon` sobre las tablas `papeleo_*`); pedirle al modelo que combine consultas para gastar menos en cada pregunta.
 
+## Portal por usuario y acceso con ticket (especificación del 2026-11-14, por construir)
+
+Pedido del responsable, tal cual:
+- Un **panel que maneja solo el administrador** (`/admin`). El administrador **genera un enlace** para cada usuario; con ese enlace el usuario **genera su ticket**, y **el ticket es la única forma de entrar al bot de Telegram**. El ticket **dura 15 minutos** y es de **un solo uso**. El administrador **puede revocar el acceso**.
+- **Todo lo maneja el usuario desde Telegram**: registrar facturas, consultarlas, **descargarlas en Excel** y **consultarlas en una página HTML**.
+- **Seguridad:** la página HTML **no se puede abrir si no se está autenticado desde Telegram**. Es de **solo lectura**.
+- **El administrador ve todos los registros** y datos de cada usuario.
+
+*Esto reemplaza el código de acceso sin vencimiento actual (ver «Control de acceso») por un ticket de 15 minutos. No es un programa externo ni usa scraping: la referencia de Silogtran (invitación + código de vinculación) solo inspira el flujo de enlace y ticket.*
+
+**Diseño propuesto (pendiente de confirmar y construir por etapas):**
+- *Etapa A, ticket:* el administrador crea un enlace de invitación (de un solo uso, vence a las 24 h); al abrirlo, la persona ve su ticket de 15 minutos y un botón «Abrir en Telegram» (`t.me/<bot>?start=TICKET`). Se canjea con la función atómica ya existente, ahora con vencimiento. Se guardan solo hashes.
+- *Etapa B, portal web de solo lectura:* desde el bot, un botón «Abrir mi panel» entrega un enlace de un solo uso (vence en pocos minutos) ligado a su identidad de Telegram; al abrirlo se crea una sesión (cookie `HttpOnly`, `SameSite=Strict`, `Secure`) que se vuelve inválida si el administrador revoca. Sin sesión, la página responde «ábrela desde Telegram». Todo se filtra en el servidor por la empresa de la sesión.
+- *Etapa C, Excel:* el bot manda un `.xlsx` (por periodo) y la web lo ofrece como descarga. Los textos que vienen de facturas se neutralizan contra inyección de fórmulas (celdas que empiezan por `=`, `+`, `-` o `@`).
+- *Etapa D, administrador:* en `/admin`, ver todas las facturas, preguntas, consumo y accesos de cada empresa o persona. Hay que avisar a los usuarios que el administrador puede ver sus registros (Ley 1581 de 2012).
+
 ## Arquitectura
 
 ```
@@ -117,6 +133,7 @@ Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos d
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por el chat.
 4. **Consultas libres en lenguaje natural** (capa 1, ver abajo). ✅ Código hecho: respuestas humanas, memoria de la conversación, registro en `papeleo_query_log`, «¿te sirvió? 👍 👎» y tope diario (migración `0004`, aplicada). **El envío de archivos queda para después de Drive (paso 3)** para no escribirlo dos veces.
 5. **Base de conocimiento** (ver abajo): glosario por empresa, ejemplos aprobados y panel «Aprendizaje» en `/admin` (migración `0007`).
+7. **Portal por usuario y acceso con ticket** (ver la sección con ese nombre): etapas A a D; la prioridad frente a los pasos anteriores está por confirmar.
 6. **Activar WhatsApp** como segundo canal cuando llegue el número (variables `WHATSAPP_*`, webhook de Meta y migración `channel`/`external_id`). Habilita además los PDF por ese canal.
 
 ### Consultas en lenguaje natural
