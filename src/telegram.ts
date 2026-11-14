@@ -133,6 +133,14 @@ export class TelegramClient implements MessengerPort {
     });
   }
 
+  async sendLink(to: string, body: string, label: string, url: string) {
+    await this.call("sendMessage", {
+      chat_id: this.chat(to),
+      text: plain(body),
+      reply_markup: { inline_keyboard: [[{ text: label, url }]] },
+    });
+  }
+
   async answerCallbackQuery(callbackQueryId: string) {
     await this.call("answerCallbackQuery", { callback_query_id: callbackQueryId });
   }

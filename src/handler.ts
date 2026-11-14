@@ -89,9 +89,28 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
     );
   }
 
+  if (command === "panel" || command === "web") return openPanel(member, deps);
+
   if (["start", "ayuda", "help", "menu", "menú"].includes(command)) return deps.wa.sendText(member.phone, HELP);
 
   return askAssistant(text, member, org, deps);
+}
+
+/** Entrega el enlace de un solo uso (5 minutos) para abrir el panel web; solo llega a personas ya vinculadas. */
+async function openPanel(member: Member, deps: Deps): Promise<void> {
+  const link = await deps.portal?.createLoginLink(member.id).catch((err) => {
+    console.error("No se pudo crear el enlace del panel", err instanceof Error ? err.message : "error");
+    return null;
+  });
+  if (!link) {
+    return deps.wa.sendText(member.phone, "El panel web no está disponible en este momento. Inténtalo de nuevo en unos minutos.");
+  }
+  return deps.wa.sendLink(
+    member.phone,
+    "Aquí tienes tu panel de facturas (solo lectura). El enlace sirve 5 minutos y una sola vez; al abrirlo, la sesión dura mientras lo uses.",
+    "Abrir mi panel",
+    link,
+  );
 }
 
 /** Cualquier otro texto es una pregunta en lenguaje natural sobre los gastos. */

@@ -8,10 +8,17 @@ const CODE_LENGTH = 12;
 export const INVITATION_TTL_HOURS = 24;
 export const TICKET_TTL_MINUTES = 15;
 
-/** Token del enlace de invitación: 256 bits aleatorios en base64url (43 caracteres). */
-export function generateInviteToken(): string {
+/** Enlace de entrada al panel web (un solo uso), inactividad que cierra la sesión y tope absoluto. */
+export const WEB_LOGIN_MINUTES = 5;
+export const WEB_IDLE_MINUTES = 30;
+export const WEB_MAX_HOURS = 8;
+
+/** Token aleatorio de 256 bits en base64url (43 caracteres): enlaces de invitación, de entrada al panel y sesiones. */
+export function generateToken(): string {
   return randomBytes(32).toString("base64url");
 }
+
+export const generateInviteToken = generateToken;
 
 export const INVITE_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
