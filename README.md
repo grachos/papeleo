@@ -12,7 +12,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
-| Panel web de solo lectura (comando `panel`) | ✅ En código (etapa B); **falta aplicar la migración `0009`, fusionar y desplegar** |
+| Panel web de solo lectura (comando `panel`) | ✅ En código (etapa B); migración `0009` aplicada y verificada el 2026-11-14; **falta fusionar y desplegar** |
 | Consumo (tokens) de cada lectura de factura | ✅ En vivo desde el 2026-11-10 (migración `0006` aplicada); aún sin datos hasta que se lea la próxima factura (ver «Costo real de leer facturas») |
 | Comandos `resumen`, `borrar`, `hoja` | ✅ Hecho |
 | Copia opcional de cada gasto a Google Sheets | ✅ Hecho |
@@ -51,7 +51,7 @@ Pedido del responsable, tal cual:
 
 **Diseño propuesto (pendiente de confirmar y construir por etapas):**
 - *Etapa A, ticket* — **✅ en vivo desde el 2026-11-14** (ver «Control de acceso»): enlace de invitación del administrador (vence a las 24 h y se gasta al vincularse) → ticket de 15 minutos y un solo uso → botón «Abrir en Telegram». Solo se guardan hashes.
-- *Etapa B, portal web de solo lectura* — **✅ en código** (migración `0009` por aplicar; ver «Panel web»): el bot entrega un enlace de entrada de un solo uso y 5 minutos; al abrirlo se crea una sesión guardada en la base (30 min de inactividad, 8 h como máximo) que se corta en cuanto el administrador revoca a la persona.
+- *Etapa B, portal web de solo lectura* — **✅ en código** (migración `0009` aplicada el 2026-11-14; falta fusionar y desplegar; ver «Panel web»): el bot entrega un enlace de entrada de un solo uso y 5 minutos; al abrirlo se crea una sesión guardada en la base (30 min de inactividad, 8 h como máximo) que se corta en cuanto el administrador revoca a la persona.
 - *Etapa C, Excel:* el bot manda un `.xlsx` (por periodo) y la web lo ofrece como descarga. Los textos que vienen de facturas se neutralizan contra inyección de fórmulas (celdas que empiezan por `=`, `+`, `-` o `@`).
 - *Etapa D, administrador:* en `/admin`, ver todas las facturas, preguntas, consumo y accesos de cada empresa o persona. Hay que avisar a los usuarios que el administrador puede ver sus registros (Ley 1581 de 2012).
 
@@ -144,10 +144,11 @@ Vista **solo de lectura** de las facturas, a la que **solo se entra desde Telegr
 - Sin scripts ni recursos externos; no se guarda en caché, no se indexa y no envía referer (el token del enlace va en la ruta). Los tokens y las URL no se registran en los logs. Intentos con enlaces malos: 10 por 15 minutos por dirección.
 - El enlace del bot se arma con la **dirección pública del servicio** (`PUBLIC_URL`, o `RENDER_EXTERNAL_URL` que pone Render), nunca con datos de la petición. Si falta, el bot dice que el panel no está disponible.
 - La migración `0009` es aditiva, con funciones `SECURITY INVOKER`, `search_path` fijo y solo ejecutables por `service_role`.
+- **Verificación en el proyecto real (2026-11-14):** las 5 funciones son `SECURITY INVOKER`; `anon` y `authenticated` reciben «permiso denegado» y `service_role` sí las ejecuta; RLS activo en las dos tablas nuevas. Con datos temporales en una transacción cancelada (sin dejar nada): el enlace se creó solo para una persona activa y se canjeó una sola vez; la sesión devolvió la empresa y el nombre con 30 minutos; la lista devolvió solo la empresa de la sesión, con tope de 50 por página, desplazamiento y total; un enlace vencido no abrió sesión; revocar a la persona cortó el enlace pendiente y la sesión viva; cerrar sesión la revocó. El linter solo añade el aviso informativo «RLS sin políticas» de las dos tablas.
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10) `0008_invitations_tickets.sql` (enlaces de invitación y tickets de 15 minutos; aplicada el 2026-11-14) y `0009_web_panel.sql` (enlaces de entrada y sesiones del panel web y la lista paginada; **por aplicar**). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10) `0008_invitations_tickets.sql` (enlaces de invitación y tickets de 15 minutos; aplicada el 2026-11-14) y `0009_web_panel.sql` (enlaces de entrada y sesiones del panel web y la lista paginada; aplicada el 2026-11-14). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
