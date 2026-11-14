@@ -81,13 +81,20 @@ export interface StorePort {
   setSheet(orgId: string, sheetId: string): Promise<void>;
 }
 
-export interface AdminCode {
+export type InvitationState = "pendiente" | "ticket" | "vinculada" | "vencida" | "revocada";
+
+export interface AdminInvitation {
   id: string;
   note: string | null;
   org_name: string;
-  status: "activo" | "usado" | "revocado";
+  state: InvitationState;
   created_at: string;
-  used_at: string | null;
+  expires_at: string;
+  /** Cuando hay un ticket vigente sin canjear, hasta cuándo sirve. */
+  ticket_expires_at: string | null;
+  /** Quién se vinculó, si la invitación ya se usó. */
+  linked_name: string | null;
+  linked_at: string | null;
 }
 
 export interface AdminMember {
@@ -102,10 +109,11 @@ export interface AdminMember {
 /** Operaciones del panel de administración. */
 export interface AdminPort {
   listOrgs(): Promise<{ id: string; name: string }[]>;
-  /** Crea el código (y la empresa si se da `newOrgName`). El código en claro solo se devuelve aquí. */
-  createCode(input: { orgId?: string; newOrgName?: string; note?: string }): Promise<{ code: string; orgName: string }>;
-  listCodes(): Promise<AdminCode[]>;
-  revokeCode(id: string): Promise<void>;
+  /** Crea la invitación (y la empresa si se da `newOrgName`). El token del enlace en claro solo se devuelve aquí. */
+  createInvitation(input: { orgId?: string; newOrgName?: string; note?: string }): Promise<{ token: string; orgName: string; expiresAt: string }>;
+  listInvitations(): Promise<AdminInvitation[]>;
+  /** Revoca una invitación sin usar y su ticket vigente. */
+  revokeInvitation(id: string): Promise<void>;
   listMembers(): Promise<AdminMember[]>;
   revokeMember(id: string): Promise<void>;
 }
@@ -194,6 +202,12 @@ export interface ExtractionResult {
   /** null si el modelo no produjo una lectura válida (aun así hubo consumo). */
   extraction: Extraction | null;
   usage: Usage;
+}
+
+/** Operaciones de la página pública del enlace de invitación. */
+export interface InvitePort {
+  /** Genera (o renueva) el ticket de una invitación vigente; null si no existe, venció, se revocó o ya se usó. */
+  issueTicket(token: string): Promise<{ ticket: string; orgName: string; expiresAt: string } | null>;
 }
 
 export interface ExtractorPort {

@@ -1,10 +1,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Extraction } from "./extract.js";
-import { generateCode, hashCode, normalizeCode } from "./access.js";
+import { generateCode, generateInviteToken, hashCode, hashToken, INVITATION_TTL_HOURS, normalizeCode, TICKET_TTL_MINUTES } from "./access.js";
+import { invitationState } from "./invitations.js";
 import type {
-  AdminCode,
+  AdminInvitation,
   AdminMember,
   AdminPort,
+  InvitePort,
   Expense,
   Member,
   NewExpense,
@@ -34,7 +36,7 @@ function toExpense(row: any): Expense {
   return { ...row, subtotal: num(row.subtotal), iva: num(row.iva), total: Number(row.total) };
 }
 
-export class SupabaseStore implements StorePort, AdminPort, QueryPort {
+export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePort {
   private db: SupabaseClient;
 
   constructor(url: string, serviceRoleKey: string, private bucket: string) {
@@ -186,7 +188,7 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort {
     return res.data as { id: string; name: string }[];
   }
 
-  async createCode(input: { orgId?: string; newOrgName?: string; note?: string }) {
+  async createInvitation(input: { orgId?: string; newOrgName?: string; note?: string }) {
     let orgId = input.orgId;
     let createdOrg = false;
     if (!orgId) {
@@ -197,33 +199,77 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort {
       orgId = org.data.id as string;
       createdOrg = true;
     }
-    const code = generateCode();
+    const token = generateInviteToken();
+    const expiresAt = new Date(Date.now() + INVITATION_TTL_HOURS * 3600_000).toISOString();
     const ins = await this.db
-      .from("papeleo_access_codes")
-      .insert({ org_id: orgId, code_hash: hashCode(normalizeCode(code)!), note: input.note?.trim() || null })
+      .from("papeleo_invitations")
+      .insert({ org_id: orgId, token_hash: hashToken(token), note: input.note?.trim() || null, expires_at: expiresAt })
       .select("org:papeleo_organizations(name)")
       .single();
     if (ins.error) {
       if (createdOrg) await this.db.from("papeleo_organizations").delete().eq("id", orgId);
       throw ins.error;
     }
-    return { code, orgName: (ins.data as any).org.name as string };
+    return { token, orgName: (ins.data as any).org.name as string, expiresAt };
   }
 
-  async listCodes() {
-    const res = await this.db
-      .from("papeleo_access_codes")
-      .select("id, note, status, created_at, used_at, org:papeleo_organizations(name)")
+  async listInvitations(): Promise<AdminInvitation[]> {
+    const inv = await this.db
+      .from("papeleo_invitations")
+      .select("id, org_id, note, status, expires_at, ticket_id, used_member_id, used_at, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
-    if (res.error) throw res.error;
-    return (res.data as any[]).map(({ org, ...c }) => ({ ...c, org_name: org?.name ?? "" })) as AdminCode[];
+    if (inv.error) throw inv.error;
+    const rows = inv.data as any[];
+    if (!rows.length) return [];
+
+    const ids = (key: string) => [...new Set(rows.map((r) => r[key]).filter(Boolean))] as string[];
+    const [orgs, tickets, members] = await Promise.all([
+      this.db.from("papeleo_organizations").select("id, name").in("id", ids("org_id")),
+      this.db.from("papeleo_access_codes").select("id, status, expires_at").in("id", ids("ticket_id")),
+      this.db.from("papeleo_members").select("id, name").in("id", ids("used_member_id")),
+    ]);
+    for (const r of [orgs, tickets, members]) if (r.error) throw r.error;
+    const byId = (list: any[] | null) => new Map((list ?? []).map((x) => [x.id, x]));
+    const orgMap = byId(orgs.data);
+    const ticketMap = byId(tickets.data);
+    const memberMap = byId(members.data);
+
+    const now = Date.now();
+    return rows.map((r) => {
+      const { state, ticketExpiresAt } = invitationState(r, ticketMap.get(r.ticket_id) ?? null, now);
+      return {
+        id: r.id,
+        note: r.note,
+        org_name: orgMap.get(r.org_id)?.name ?? "",
+        state,
+        created_at: r.created_at,
+        expires_at: r.expires_at,
+        ticket_expires_at: ticketExpiresAt,
+        linked_name: memberMap.get(r.used_member_id)?.name ?? null,
+        linked_at: r.used_at,
+      };
+    });
   }
 
-  async revokeCode(id: string) {
-    // Solo se revoca un código que aún no se usó; para quitar a alguien ya vinculado se revoca su acceso.
-    const res = await this.db.from("papeleo_access_codes").update({ status: "revocado" }).eq("id", id).eq("status", "activo");
+  async revokeInvitation(id: string) {
+    const res = await this.db.rpc("papeleo_revoke_invitation", { p_id: id });
     if (res.error) throw res.error;
+  }
+
+  // --- Página pública del enlace de invitación ---
+
+  async issueTicket(token: string) {
+    const ticket = generateCode();
+    const res = await this.db.rpc("papeleo_issue_ticket", {
+      p_token_hash: hashToken(token),
+      p_ticket_hash: hashCode(normalizeCode(ticket)!),
+      p_ticket_minutes: TICKET_TTL_MINUTES,
+    });
+    if (res.error) throw res.error;
+    const row = (res.data as any[] | null)?.[0];
+    if (!row) return null;
+    return { ticket, orgName: row.r_org_name as string, expiresAt: row.r_expires_at as string };
   }
 
   async listMembers() {
