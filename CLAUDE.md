@@ -36,7 +36,7 @@ Antes de dar algo por terminado: `npm test`, `npm run build` y `npm audit` sin e
 
 ## Relevo de sesión (2026-11-10, noche)
 
-El usuario se fue a descansar. **Mientras no responda, no se hacen acciones externas que requieren su visto bueno:** no aplicar migraciones, no fusionar PR, no cambiar variables de Render ni lanzar despliegues. Sí se puede revisar logs y datos (solo lectura) y preparar trabajo en local. Estado y pendientes detallados: README «Punto de partida para la próxima sesión».
+El usuario descansó entre el 2026-11-10 y el 2026-11-14 y ya volvió; aquellas reglas aplican **cada vez que esté ausente**: **mientras no responda, no se hacen acciones externas que requieren su visto bueno:** no aplicar migraciones, no fusionar PR, no cambiar variables de Render ni lanzar despliegues. Sí se puede revisar logs y datos (solo lectura) y preparar trabajo en local. Estado y pendientes detallados: README «Punto de partida para la próxima sesión».
 
 Lecciones operativas de esta sesión:
 - Render **no despliega solo** al fusionar a `main`: lanzar un despliegue (con aprobación) y verificar logs. Cambiar una variable por la API de Render sí dispara un despliegue.
@@ -58,7 +58,7 @@ Lecciones operativas de esta sesión:
 
 - Español en mensajes al usuario, comentarios y commits. Código e identificadores técnicos como están.
 - Los tests usan dependencias simuladas inyectadas (`Deps`); mantener ese patrón. El SQL de las migraciones se prueba contra Postgres real en memoria (PGlite, `tests/migrations.test.ts`): toda función SQL nueva lleva pruebas de aislamiento entre empresas y de permisos.
-- Modelo de las consultas: variable `QUERY_MODEL` (por defecto en código `claude-opus-5-5`; en Render se cambia por variable, que manda sobre el código). Costos medidos y comparación en el README «Modelo y costo». Opus se reserva para **leer** facturas; un modelo más barato para preguntar.
+- Modelos (variables que mandan sobre el código): `QUERY_MODEL` (consultas; defecto `claude-opus-5-5`, en Render `claude-haiku-5-5` para la prueba) y `EXTRACTION_MODEL` (lectura de facturas; defecto `claude-opus-5-5`). **Desde el 2026-11-14 el usuario decidió leer facturas con `claude-haiku-5-5` en Render para ahorrar costo; no está verificado.** Vigilar `confianza` baja, totales/fechas erróneos y lecturas `no_reconocido`/`error` en facturas legibles; si aparecen, volver a Opus o leer con Haiku y repetir con Opus solo con confianza baja (idea no implementada). Costos medidos y comparación en el README «Modelo y costo».
 - **Consumo de la lectura**: cada lectura registra modelo y tokens en `papeleo_documents` (`extraction_model`, `tokens_in`, `tokens_out`, migración `0006`). Ese registro es tolerante a fallos y nunca debe impedir procesar una factura. Consulta de costo mensual en el README «Costo real de leer facturas».
 - Migraciones nuevas en `supabase/migrations/000N_*.sql`; no editar `0001_init.sql` ya aplicada.
 - Trabajar en la rama indicada por la sesión; no abrir PR sin que el usuario lo pida. Si su PR ya se fusionó, reiniciar la rama desde `main` antes de seguir.

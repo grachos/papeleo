@@ -24,9 +24,9 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 
 ## Punto de partida para la próxima sesión (2026-11-10, noche)
 
-El responsable del proyecto dejó todo funcionando y se fue a descansar; no se espera su respuesta hasta que vuelva.
+El responsable del proyecto dejó todo funcionando el 2026-11-10 y volvió el 2026-11-14; entre ambas fechas no se subieron más facturas ni se hicieron más preguntas.
 
-- **En vivo:** `https://papeleo.onrender.com`, commit `8a43b09`, canal Telegram con el webhook registrado. Modelos: lectura de facturas con `claude-opus-5-5` (`EXTRACTION_MODEL`); preguntas con `claude-haiku-5-5` (`QUERY_MODEL`, puesto en Render para la prueba de calidad).
+- **En vivo:** `https://papeleo.onrender.com`, commit `8a43b09`, canal Telegram con el webhook registrado. Modelos (valores en Render desde el 2026-11-14): **lectura de facturas con `claude-haiku-5-5` (`EXTRACTION_MODEL`, decisión del responsable para ahorrar; ver «Modelo y costo»)**; preguntas con `claude-haiku-5-5` (`QUERY_MODEL`, puesto en Render para la prueba de calidad).
 - **Base de datos (`real-samaria`):** migraciones `0001`, `0002`, `0004`, `0005` y `0006` aplicadas. La `0003` está reservada para los renglones de factura y la `0007` para la base de conocimiento.
 - **Datos de prueba hasta ahora:** 1 persona vinculada, 1 factura (un recibo de $380.000 leído con confianza «alta»), 1 pregunta respondida con 👍. Esa factura se leyó antes de la migración `0006`, así que **todavía no hay tokens de lectura registrados**.
 
@@ -149,6 +149,10 @@ Filtros comunes: `desde`, `hasta`, `categoria`, `proveedor`, `texto` (palabra en
 
 **Modelo y costo:** `QUERY_MODEL` (por defecto `claude-opus-5-5`). Cada pregunta hace de 2 a 4 llamadas, así que es la variable que más pesa en el costo. Medido con una pregunta real: 13.559 tokens de entrada y 696 de salida, repartidos en 5 llamadas al modelo y 4 consultas a la base (≈ $0,07 con Opus 5.5, ≈ $0,035 con Sonnet 5.5, ≈ $0,002 con Haiku 5.5, según los precios publicados). **En Render se configuró `QUERY_MODEL=claude-sonnet-5-5` y luego `claude-haiku-5-5` para una prueba de calidad** (la variable manda sobre el valor por defecto del código); el resultado de la comparación se anotará aquí. Recomendación de fondo: Opus solo para **leer** facturas, donde la precisión importa, y un modelo más barato para las preguntas. El mensaje de sistema y las herramientas son estables y se envían con caché de prompt (pesan ≈2.300 tokens, que podría ser menos que el mínimo cacheable de algunos modelos). No se activó el reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`): las preguntas sobre facturas no suelen activarlos y un rechazo se responde con «no pude responder eso».
 
+**Lectura de facturas con Haiku (decisión del 2026-11-14, sin verificar):** el responsable pidió leer con `claude-haiku-5-5` en vez de Opus, apostando a que «aguanta». **Nunca se ha probado**: la única factura leída (un recibo de $380.000) se leyó con Opus antes de existir el registro de tokens, y este entorno no tiene credenciales de la API para probarlo. Costo esperado: unos 2.100 tokens de entrada y ~1.000 de salida por factura ≈ **$0,001** con Haiku (precios publicados: $0,10 y $0,50 por millón), frente a ≈$0,02 a $0,06 con Opus. Es una variable, `EXTRACTION_MODEL`, y se revierte en un minuto.
+
+*Cómo comprobar la calidad con las primeras facturas:* subir una foto nueva del mismo recibo (el archivo idéntico se rechaza por duplicado) y comparar con la lectura de Opus guardada (proveedor «Conjunto Residencial Silvia Rosa», fecha 2026-04-16, total 380.000 COP, efectivo, categoría «otros», confianza «alta»); subir además una foto borrosa y un PDF. Señales para volver a Opus: totales, fechas o NIT equivocados, `confianza` «baja» frecuente, lecturas `no_reconocido` o `error` en facturas legibles, o conceptos inventados. Alternativa intermedia (no implementada): leer con Haiku y repetir con Opus solo cuando la confianza sea baja o falte el total.
+
 ### Costo real de leer facturas
 
 Cada lectura guarda en `papeleo_documents` el modelo y los tokens que cobró la API: `extraction_model`, `tokens_in` (incluye los leídos y escritos en caché) y `tokens_out` (incluye el razonamiento interno del modelo). Se registra incluso cuando la lectura no produjo resultado, porque igual se cobra; los documentos anteriores a la migración `0006` quedan en null. Guardar el consumo es un paso aparte y tolerante a fallos: si falla, la factura se procesa igual y el error queda en el log.
@@ -160,7 +164,7 @@ select date_trunc('month', created_at) as mes,
        count(*) as lecturas,
        sum(tokens_in) as tokens_entrada,
        sum(tokens_out) as tokens_salida,
-       round(sum(tokens_in) * 4.0 / 1e6 + sum(tokens_out) * 20.0 / 1e6, 2) as costo_usd_opus_5_5
+       round(sum(tokens_in) * 4.0 / 1e6 + sum(tokens_out) * 20.0 / 1e6, 2) as costo_usd_opus_5_5,  -- Haiku 5.5: 0.10 y 0.50
 from papeleo_documents
 where tokens_in is not null
 group by 1 order by 1 desc;
@@ -237,7 +241,7 @@ Copia `.env.example` a `.env` y completa los valores.
 | `SUPABASE_SERVICE_ROLE_KEY` | Llave de servidor de Supabase (solo en el servidor, nunca en un cliente) |
 | `SUPABASE_BUCKET` | Por defecto `papeleo-documentos` (se reemplazará por Drive) |
 | `ANTHROPIC_API_KEY` | Lectura de facturas y consultas |
-| `EXTRACTION_MODEL` | Modelo que lee las facturas. Por defecto `claude-opus-5-5` |
+| `EXTRACTION_MODEL` | Modelo que lee las facturas. Por defecto en el código `claude-opus-5-5`; **en Render está en `claude-haiku-5-5` desde el 2026-11-14** (ver «Modelo y costo») |
 | `QUERY_MODEL` | Modelo del asistente de consultas. Por defecto `claude-opus-5-5`; cada pregunta hace 2 a 4 llamadas (ver «Modelo y costo») |
 | `QUERY_DAILY_CAP` | Preguntas máximas por persona y día. Por defecto 40 |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Opcional. JSON de la cuenta de servicio, tal cual o en base64 |
