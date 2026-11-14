@@ -1,6 +1,18 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Extraction } from "./extract.js";
-import { generateCode, generateInviteToken, hashCode, hashToken, INVITATION_TTL_HOURS, normalizeCode, TICKET_TTL_MINUTES } from "./access.js";
+import {
+  generateCode,
+  generateInviteToken,
+  generateToken,
+  hashCode,
+  hashToken,
+  INVITATION_TTL_HOURS,
+  normalizeCode,
+  TICKET_TTL_MINUTES,
+  WEB_IDLE_MINUTES,
+  WEB_LOGIN_MINUTES,
+  WEB_MAX_HOURS,
+} from "./access.js";
 import { invitationState } from "./invitations.js";
 import type {
   AdminInvitation,
@@ -11,6 +23,9 @@ import type {
   Member,
   NewExpense,
   Org,
+  PanelFilters,
+  PanelPort,
+  PanelSession,
   QueryFilters,
   QueryLogEntry,
   QueryPort,
@@ -36,7 +51,7 @@ function toExpense(row: any): Expense {
   return { ...row, subtotal: num(row.subtotal), iva: num(row.iva), total: Number(row.total) };
 }
 
-export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePort {
+export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePort, PanelPort {
   private db: SupabaseClient;
 
   constructor(url: string, serviceRoleKey: string, private bucket: string) {
@@ -255,6 +270,64 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
   async revokeInvitation(id: string) {
     const res = await this.db.rpc("papeleo_revoke_invitation", { p_id: id });
     if (res.error) throw res.error;
+  }
+
+  // --- Panel web (enlace de entrada, sesiones y listado) ---
+
+  /** Crea el enlace de entrada de una persona activa; devuelve el token en claro, o null si la persona ya no tiene acceso. */
+  async createWebLogin(memberId: string): Promise<string | null> {
+    const token = generateToken();
+    const res = await this.db.rpc("papeleo_web_login_create", {
+      p_member_id: memberId,
+      p_token_hash: hashToken(token),
+      p_minutes: WEB_LOGIN_MINUTES,
+    });
+    if (res.error) throw res.error;
+    return res.data === true ? token : null;
+  }
+
+  async consumeLogin(token: string): Promise<string | null> {
+    const session = generateToken();
+    const res = await this.db.rpc("papeleo_web_login_consume", {
+      p_token_hash: hashToken(token),
+      p_session_hash: hashToken(session),
+      p_idle_minutes: WEB_IDLE_MINUTES,
+    });
+    if (res.error) throw res.error;
+    return (res.data as any[] | null)?.length ? session : null;
+  }
+
+  async session(sessionToken: string): Promise<PanelSession | null> {
+    const res = await this.db.rpc("papeleo_web_session_touch", {
+      p_session_hash: hashToken(sessionToken),
+      p_idle_minutes: WEB_IDLE_MINUTES,
+      p_max_hours: WEB_MAX_HOURS,
+    });
+    if (res.error) throw res.error;
+    const row = (res.data as any[] | null)?.[0];
+    if (!row) return null;
+    return { memberId: row.r_member_id, orgId: row.r_org_id, orgName: row.r_org_name, memberName: row.r_member_name ?? null };
+  }
+
+  async endSession(sessionToken: string): Promise<void> {
+    const res = await this.db.rpc("papeleo_web_session_end", { p_session_hash: hashToken(sessionToken) });
+    if (res.error) throw res.error;
+  }
+
+  async list(orgId: string, f: PanelFilters, page: number, pageSize: number) {
+    const res = await this.db.rpc("papeleo_panel_listar", {
+      p_org_id: orgId,
+      p_desde: f.desde ?? null,
+      p_hasta: f.hasta ?? null,
+      p_categoria: f.categoria ?? null,
+      p_proveedor: f.proveedor ?? null,
+      p_texto: f.texto ?? null,
+      p_limite: pageSize,
+      p_offset: (page - 1) * pageSize,
+    });
+    if (res.error) throw res.error;
+    const rows = res.data as any[];
+    return { rows: rows.map(({ total_filas, ...e }) => toExpense(e)), total: rows.length ? Number(rows[0].total_filas) : 0 };
   }
 
   // --- Página pública del enlace de invitación ---

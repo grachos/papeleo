@@ -3,6 +3,7 @@ import { AttemptLimiter } from "./access.js";
 import { ClaudeAssistant } from "./assistant.js";
 import { createAdminRouter } from "./admin.js";
 import { createInviteRouter } from "./invite.js";
+import { createPanelRouter } from "./panel.js";
 import { loadConfig } from "./config.js";
 import { ClaudeExtractor } from "./extract.js";
 import { handleMessage } from "./handler.js";
@@ -18,6 +19,7 @@ const config = loadConfig();
 const noWhatsApp: MessengerPort = {
   sendText: () => Promise.reject(new Error("El canal de WhatsApp no está configurado")),
   sendButtons: () => Promise.reject(new Error("El canal de WhatsApp no está configurado")),
+  sendLink: () => Promise.reject(new Error("El canal de WhatsApp no está configurado")),
   downloadMedia: () => Promise.reject(new Error("El canal de WhatsApp no está configurado")),
 };
 
@@ -25,12 +27,23 @@ const telegramClient = config.telegram ? new TelegramClient(config.telegram.botT
 
 const store = new SupabaseStore(config.supabase.url, config.supabase.serviceRoleKey, config.supabase.bucket);
 
+// Enlace de entrada al panel web: necesita la dirección pública del servicio (no se arma con datos de la petición).
+const publicBase = config.publicUrl?.replace(/\/$/, "") ?? null;
+
 const deps: Deps = {
   limiter: new AttemptLimiter(5, 60 * 60 * 1000), // 5 códigos erróneos por hora y remitente
   wa: config.whatsapp ? new WhatsAppClient(config.whatsapp) : noWhatsApp,
   tg: telegramClient ?? undefined,
   store,
   query: store,
+  portal: publicBase
+    ? {
+        createLoginLink: async (memberId) => {
+          const token = await store.createWebLogin(memberId);
+          return token ? `${publicBase}/panel/entrar/${token}` : null;
+        },
+      }
+    : undefined,
   assistant: new ClaudeAssistant(config.queryModel, store),
   dailyCap: config.queryDailyCap,
   extractor: new ClaudeExtractor(config.extractionModel),
@@ -44,6 +57,9 @@ let botUsername: string | null = null;
 
 // Página pública del enlace de invitación (el token de la ruta es lo único que da acceso).
 app.use(createInviteRouter({ store, botUsername: () => botUsername }));
+
+// Panel web de solo lectura: solo se entra con el enlace que entrega el bot.
+app.use(createPanelRouter({ store, query: store }));
 
 if (config.adminPassword) {
   app.use(createAdminRouter({ store, password: config.adminPassword, botUsername: () => botUsername }));
@@ -123,8 +139,8 @@ app.listen(config.port, () => {
   }
 
   // Registra el webhook de Telegram al arrancar, si se conoce la URL pública.
-  if (config.telegram && telegramClient && config.telegram.publicUrl) {
-    const url = `${config.telegram.publicUrl.replace(/\/$/, "")}/telegram/webhook`;
+  if (config.telegram && telegramClient && publicBase) {
+    const url = `${publicBase}/telegram/webhook`;
     telegramClient
       .setWebhook(url, config.telegram.webhookSecret)
       .then(() => console.log(`Webhook de Telegram registrado en ${url}`))

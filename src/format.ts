@@ -6,6 +6,11 @@ export function money(value: number): string {
   return cop.format(value);
 }
 
+/** Dinero en su moneda: pesos con formato colombiano; otras monedas con su código delante. */
+export function moneyIn(value: number, moneda: string): string {
+  return moneda === "COP" ? money(value) : `${moneda} ${value.toLocaleString("es-CO", { maximumFractionDigits: 2 })}`;
+}
+
 /** Fecha de hoy en Colombia (UTC-5, sin horario de verano) como AAAA-MM-DD. */
 export function todayBogota(): string {
   return new Date(Date.now() - 5 * 3600_000).toISOString().slice(0, 10);
@@ -56,5 +61,6 @@ export const HELP = [
   "Y estos atajos:",
   "• *resumen*: total del mes por categoría",
   "• *borrar*: descarta el último gasto",
+  "• *panel*: abre tus facturas en una página web (solo lectura)",
   "• *hoja* + enlace: copia cada gasto a tu hoja de Google",
 ].join("\n");

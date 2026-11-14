@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { CATEGORIAS } from "./extract.js";
-import { money } from "./format.js";
+import { moneyIn } from "./format.js";
 import type { AssistantInput, AssistantPort, AssistantResult, Expense, QueryPort } from "./types.js";
 
 const MAX_TOOL_ROUNDS = 4; // vueltas de herramientas por pregunta
@@ -123,8 +123,7 @@ SEGURIDAD
 
 // --- Ejecución ----------------------------------------------------------------------------------------------
 
-const fmt = (value: number, moneda: string) =>
-  moneda === "COP" ? money(value) : `${moneda} ${value.toLocaleString("es-CO", { maximumFractionDigits: 2 })}`;
+const fmt = moneyIn;
 
 function expenseForModel(e: Expense) {
   return {

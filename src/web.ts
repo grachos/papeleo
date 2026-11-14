@@ -42,3 +42,11 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "X-Robots-Tag": "noindex, nofollow",
   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
 };
+
+/** Valor de una cookie de la petición, o undefined. */
+export function getCookie(header: string | undefined, name: string): string | undefined {
+  return header
+    ?.split(";")
+    .map((c) => c.trim().split("="))
+    .find(([k]) => k === name)?.[1];
+}

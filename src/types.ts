@@ -59,6 +59,8 @@ export interface Button {
 export interface MessengerPort {
   sendText(to: string, body: string): Promise<void>;
   sendButtons(to: string, body: string, buttons: Button[]): Promise<void>;
+  /** Mensaje con un botón que abre un enlace (en canales sin botón de enlace, el enlace va en el texto). */
+  sendLink(to: string, body: string, label: string, url: string): Promise<void>;
   downloadMedia(mediaId: string): Promise<{ data: Buffer; mimeType: string }>;
 }
 
@@ -210,6 +212,36 @@ export interface InvitePort {
   issueTicket(token: string): Promise<{ ticket: string; orgName: string; expiresAt: string } | null>;
 }
 
+export interface PanelSession {
+  memberId: string;
+  orgId: string;
+  orgName: string;
+  memberName: string | null;
+}
+
+export interface PanelFilters {
+  desde?: string;
+  hasta?: string;
+  categoria?: string;
+  proveedor?: string;
+  texto?: string;
+}
+
+/** Sesiones y listado del panel web. La empresa sale siempre de la sesión, nunca de la petición. */
+export interface PanelPort {
+  /** Canjea el enlace de entrada (un solo uso) y devuelve el token de sesión en claro, o null. */
+  consumeLogin(token: string): Promise<string | null>;
+  /** Valida la sesión y la prolonga; null si no existe, venció, se revocó o la persona perdió el acceso. */
+  session(sessionToken: string): Promise<PanelSession | null>;
+  endSession(sessionToken: string): Promise<void>;
+  list(orgId: string, filters: PanelFilters, page: number, pageSize: number): Promise<{ rows: Expense[]; total: number }>;
+}
+
+/** Crea el enlace que el bot le entrega a una persona vinculada para abrir el panel. */
+export interface PortalPort {
+  createLoginLink(memberId: string): Promise<string | null>;
+}
+
 export interface ExtractorPort {
   extract(data: Buffer, mimeType: string): Promise<ExtractionResult>;
 }
@@ -231,6 +263,8 @@ export interface Deps {
   today?: () => string;
   /** Asistente de consultas en lenguaje natural (si falta, el texto libre recibe la ayuda). */
   assistant?: AssistantPort;
+  /** Enlace de entrada al panel web (si falta, el comando «panel» responde que no está disponible). */
+  portal?: PortalPort;
   query?: QueryPort;
   /** Máximo de preguntas por persona y día (por defecto 40). */
   dailyCap?: number;

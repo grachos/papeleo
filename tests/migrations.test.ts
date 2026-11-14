@@ -61,6 +61,7 @@ beforeAll(async () => {
   await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa L')", [ORG_L]);
   await db.query("insert into papeleo_access_codes (org_id, code_hash) values ($1, $2)", [ORG_L, LEGACY_HASH]);
   await db.exec(sql("0008_invitations_tickets.sql"));
+  await db.exec(sql("0009_web_panel.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -305,6 +306,185 @@ describe("tickets e invitaciones (0008)", () => {
     }
     const rls = await db.query<any>("select relrowsecurity from pg_class where relname = 'papeleo_invitations'");
     expect(rls.rows[0].relrowsecurity).toBe(true);
+  });
+});
+
+describe("panel web: enlaces de entrada y sesiones (0009)", () => {
+  const ORG_W = "99999999-0000-4000-8000-000000000009";
+  const ORG_X = "88888888-0000-4000-8000-000000000008";
+  const MEM = "99999999-1111-4111-8111-000000000001";
+  const MEM_X = "88888888-1111-4111-8111-000000000002";
+  let ready = false;
+  const setup = async () => {
+    if (ready) return;
+    await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa W'), ($2, 'Empresa X')", [ORG_W, ORG_X]);
+    await db.query("insert into papeleo_members (id, org_id, phone, name) values ($1, $2, 'tg:w1', 'Wanda'), ($3, $4, 'tg:x1', 'Xavi')", [MEM, ORG_W, MEM_X, ORG_X]);
+    ready = true;
+  };
+  const create = async (member = MEM, mins = 5) => {
+    await setup();
+    const token = rnd();
+    const r = await db.query<any>("select papeleo_web_login_create($1, $2, $3::int) as ok", [member, token, mins]);
+    return { token, ok: r.rows[0].ok as boolean };
+  };
+  const consume = (token: string, session: string, idle = 30) => db.query<any>("select * from papeleo_web_login_consume($1, $2, $3::int)", [token, session, idle]);
+  const touch = (session: string, idle = 30, max = 8) => db.query<any>("select * from papeleo_web_session_touch($1, $2::int, $3::int)", [session, idle, max]);
+  const login = async (member = MEM) => {
+    const { token } = await create(member);
+    const session = rnd();
+    await consume(token, session);
+    return session;
+  };
+  const sess = async (session: string) => (await db.query<any>("select * from papeleo_web_sessions where token_hash = $1", [session])).rows[0];
+
+  it("el enlace de entrada se crea solo para una persona activa y se canjea una sola vez", async () => {
+    const { token, ok } = await create();
+    expect(ok).toBe(true);
+    const session = rnd();
+    const first = await consume(token, session);
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0]).toMatchObject({ r_member_id: MEM, r_org_id: ORG_W });
+    expect((await consume(token, rnd())).rows).toHaveLength(0); // un solo uso
+    expect(await sess(session)).toBeTruthy();
+  });
+
+  it("un enlace vencido o desconocido no abre sesión", async () => {
+    const { token } = await create();
+    await db.query("update papeleo_web_logins set expires_at = now() - interval '1 second' where token_hash = $1", [token]);
+    expect((await consume(token, rnd())).rows).toHaveLength(0);
+    expect((await consume(rnd(), rnd())).rows).toHaveLength(0);
+  });
+
+  it("una persona revocada no recibe enlace, ni puede canjear el que ya tenía, y su sesión muere en la siguiente petición", async () => {
+    const MEM_R = "77777777-1111-4111-8111-000000000007";
+    await setup();
+    await db.query("insert into papeleo_members (id, org_id, phone, name) values ($1, $2, 'tg:w2', 'Rita')", [MEM_R, ORG_W]);
+
+    const pendiente = await create(MEM_R);
+    const viva = await login(MEM_R);
+    expect((await touch(viva)).rows).toHaveLength(1);
+
+    await db.query("update papeleo_members set revoked_at = now() where id = $1", [MEM_R]);
+    expect((await consume(pendiente.token, rnd())).rows).toHaveLength(0);
+    expect((await touch(viva)).rows).toHaveLength(0); // corta de inmediato
+    expect((await create(MEM_R)).ok).toBe(false);
+    expect((await create("11111111-2222-4222-8222-333333333333")).ok).toBe(false); // persona inexistente
+  });
+
+  it("la sesión devuelve la empresa y el nombre, y se prolonga con cada petición", async () => {
+    const session = await login();
+    await db.query("update papeleo_web_sessions set expires_at = now() + interval '1 minute' where token_hash = $1", [session]);
+    const r = await touch(session);
+    expect(r.rows[0]).toMatchObject({ r_member_id: MEM, r_org_id: ORG_W, r_org_name: "Empresa W", r_member_name: "Wanda" });
+    const minutos = (new Date((await sess(session)).expires_at).getTime() - Date.now()) / 60000;
+    expect(minutos).toBeGreaterThan(29);
+    expect(minutos).toBeLessThanOrEqual(30);
+  });
+
+  it("vence por inactividad y tiene un tope absoluto aunque se siga usando", async () => {
+    const inactiva = await login();
+    await db.query("update papeleo_web_sessions set expires_at = now() - interval '1 second' where token_hash = $1", [inactiva]);
+    expect((await touch(inactiva)).rows).toHaveLength(0);
+
+    const larga = await login();
+    await db.query("update papeleo_web_sessions set created_at = now() - interval '7 hours 50 minutes' where token_hash = $1", [larga]);
+    expect((await touch(larga)).rows).toHaveLength(1);
+    const minutos = (new Date((await sess(larga)).expires_at).getTime() - Date.now()) / 60000;
+    expect(minutos).toBeLessThanOrEqual(10.5); // no pasa de las 8 horas desde que se creó
+
+    const pasada = await login();
+    await db.query("update papeleo_web_sessions set created_at = now() - interval '9 hours' where token_hash = $1", [pasada]);
+    expect((await touch(pasada)).rows).toHaveLength(0);
+  });
+
+  it("cerrar sesión la revoca", async () => {
+    const session = await login();
+    await db.query("select papeleo_web_session_end($1)", [session]);
+    expect((await touch(session)).rows).toHaveLength(0);
+    expect((await sess(session)).revoked_at).not.toBeNull();
+  });
+
+  it("al crear un enlace se limpian los vencidos hace más de un día", async () => {
+    await setup();
+    const viejo = rnd();
+    await db.query("insert into papeleo_web_logins (member_id, token_hash, expires_at) values ($1, $2, now() - interval '2 days')", [MEM, viejo]);
+    await create();
+    const r = await db.query<any>("select count(*)::int as n from papeleo_web_logins where token_hash = $1", [viejo]);
+    expect(r.rows[0].n).toBe(0);
+  });
+
+  it("rechaza tiempos fuera de rango", async () => {
+    await setup();
+    await expect(db.query("select papeleo_web_login_create($1, $2, 0)", [MEM, rnd()])).rejects.toThrow("minutos_invalidos");
+    await expect(db.query("select papeleo_web_login_create($1, $2, 31)", [MEM, rnd()])).rejects.toThrow("minutos_invalidos");
+    await expect(consume(rnd(), rnd(), 0)).rejects.toThrow("minutos_invalidos");
+    await expect(touch(rnd(), 30, 25)).rejects.toThrow("minutos_invalidos");
+  });
+
+  describe("papeleo_panel_listar", () => {
+    const listar = (org: string, over: Record<string, unknown> = {}) => {
+      const a = { desde: null, hasta: null, categoria: null, proveedor: null, texto: null, moneda: null, orden: "fecha_desc", limite: 25, offset: 0, ...over };
+      return db.query<any>("select * from papeleo_panel_listar($1::uuid,$2::date,$3::date,$4,$5,$6,$7,$8,$9::int,$10::int)", [org, a.desde, a.hasta, a.categoria, a.proveedor, a.texto, a.moneda, a.orden, a.limite, a.offset]);
+    };
+    let filled = false;
+    const fill = async () => {
+      if (filled) return;
+      await setup();
+      // la memoria del módulo usa expense() con las empresas del archivo; aquí se insertan filas propias
+      const DOC = (await db.query<any>("insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type) values ($1, $2, 'panel-doc', 'image/jpeg') returning id", [ORG_W, MEM])).rows[0].id;
+      for (let i = 0; i < 60; i++) {
+        await db.query("insert into papeleo_expenses (org_id, member_id, document_id, fecha, proveedor, total, categoria, confianza) values ($1, $2, $3, $4, $5, $6, 'otros', 'alta')", [ORG_W, MEM, DOC, `2026-01-${String((i % 28) + 1).padStart(2, "0")}`, i === 7 ? "Éxito Panel" : `P${i}`, 100 + i]);
+      }
+      const DOCX = (await db.query<any>("insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type) values ($1, $2, 'panel-doc-x', 'image/jpeg') returning id", [ORG_X, MEM_X])).rows[0].id;
+      await db.query("insert into papeleo_expenses (org_id, member_id, document_id, fecha, proveedor, total, categoria, confianza) values ($1, $2, $3, '2026-02-01', 'Ajeno', 999999, 'otros', 'alta')", [ORG_X, MEM_X, DOCX]);
+      filled = true;
+    };
+
+    it("solo devuelve la empresa pedida", async () => {
+      await fill();
+      const w = await listar(ORG_W, { limite: 50 });
+      expect(w.rows.every((r: any) => r.proveedor !== "Ajeno")).toBe(true);
+      expect(Number(w.rows[0].total_filas)).toBe(60);
+      const x = await listar(ORG_X);
+      expect(x.rows.map((r: any) => r.proveedor)).toEqual(["Ajeno"]);
+      expect((await listar("11111111-9999-4999-8999-999999999999")).rows).toHaveLength(0);
+    });
+
+    it("topa la página en 50 filas, pagina con desplazamiento y acota el desplazamiento", async () => {
+      await fill();
+      expect((await listar(ORG_W, { limite: 500 })).rows).toHaveLength(50);
+      const p2 = await listar(ORG_W, { limite: 25, offset: 50, orden: "total_asc" });
+      expect(p2.rows).toHaveLength(10);
+      expect(Number(p2.rows[0].total_filas)).toBe(60);
+      expect((await listar(ORG_W, { offset: -5 })).rows).toHaveLength(25);
+      expect((await listar(ORG_W, { offset: 999999999 })).rows).toHaveLength(0);
+    });
+
+    it("filtra sin importar tildes y rechaza órdenes inválidos", async () => {
+      await fill();
+      expect((await listar(ORG_W, { proveedor: "exito" })).rows).toHaveLength(1);
+      expect((await listar(ORG_W, { proveedor: "%" })).rows).toHaveLength(0);
+      await expect(listar(ORG_W, { orden: "x; drop" })).rejects.toThrow("orden_invalido");
+    });
+  });
+
+  it("anon y authenticated no pueden ejecutar ninguna función nueva; service_role sí; las tablas tienen RLS", async () => {
+    const fns = [
+      "papeleo_web_login_create(uuid, text, integer)",
+      "papeleo_web_login_consume(text, text, integer)",
+      "papeleo_web_session_touch(text, integer, integer)",
+      "papeleo_web_session_end(text)",
+      "papeleo_panel_listar(uuid, date, date, text, text, text, text, text, integer, integer)",
+    ];
+    for (const fn of fns) {
+      for (const [role, esperado] of [["anon", false], ["authenticated", false], ["service_role", true]] as const) {
+        const r = await db.query<any>(`select has_function_privilege('${role}', '${fn}', 'execute') as ok`);
+        expect([role, fn, r.rows[0].ok]).toEqual([role, fn, esperado]);
+      }
+    }
+    for (const t of ["papeleo_web_logins", "papeleo_web_sessions"]) {
+      expect((await db.query<any>("select relrowsecurity from pg_class where relname = $1", [t])).rows[0].relrowsecurity).toBe(true);
+    }
   });
 });
 

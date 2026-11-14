@@ -61,6 +61,10 @@ export class WhatsAppClient implements WhatsAppPort {
     return this.send(to, { type: "text", text: { body } });
   }
 
+  sendLink(to: string, body: string, label: string, url: string) {
+    return this.sendText(to, `${body}\n\n${label}: ${url}`);
+  }
+
   sendButtons(to: string, body: string, buttons: Button[]) {
     return this.send(to, {
       type: "interactive",

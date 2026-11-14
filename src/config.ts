@@ -43,8 +43,6 @@ export function loadConfig() {
     ? {
         botToken: required("TELEGRAM_BOT_TOKEN"),
         webhookSecret: telegramSecret(required("TELEGRAM_WEBHOOK_SECRET")),
-        // Si se define, el servidor registra solo el webhook al arrancar. Render aporta RENDER_EXTERNAL_URL.
-        publicUrl: process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? null,
       }
     : null;
 
@@ -63,6 +61,8 @@ export function loadConfig() {
     whatsapp,
     telegram,
     adminPassword,
+    // Dirección pública del servicio: registra el webhook de Telegram y arma los enlaces del panel. Render aporta RENDER_EXTERNAL_URL.
+    publicUrl: process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? null,
     supabase: {
       url: required("SUPABASE_URL"),
       serviceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
