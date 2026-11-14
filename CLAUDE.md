@@ -47,7 +47,7 @@ Lecciones operativas de esta sesión:
 
 ## Hoja de ruta (orden acordado)
 
-0. **Migración `0008_invitations_tickets.sql` (etapa A) escrita y probada en Postgres real; pendiente de aplicar en Supabase, y hacerlo ANTES de desplegar.** ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10). `0006_extraction_usage.sql` (consumo de la lectura) también aplicada y en vivo.
+0. ✅ **Migración `0008_invitations_tickets.sql` (etapa A) aplicada y verificada el 2026-11-14 en `real-samaria`; falta fusionar a `main` y desplegar el código** (mientras tanto el bot en vivo sigue funcionando: la función de canje conserva su firma, y los tickets sin vencimiento ya no sirven). ✅ Migraciones `0002_access_codes.sql`, `0004_query_assistant.sql` y `0005_harden_like_escape.sql` aplicadas (proyecto Supabase `real-samaria`, 2026-11-10). `0006_extraction_usage.sql` (consumo de la lectura) también aplicada y en vivo.
 1. ✅ **Render arriba y probado por Telegram** (2026-11-10, servicio en vivo): código de acceso → recibo leído con Opus → pregunta respondida con la API real. Pendiente: más facturas (borrosas, PDF, con IVA) y la prueba de modelos para las preguntas (Haiku 5.5 vs Sonnet 5.5; `QUERY_MODEL` en Render está en `claude-haiku-5-5` para esa prueba). Guardar variables en Render no siempre redespliega; verificar que haya un despliegue nuevo tras cada fusión a `main`.
 2. Extracción con conceptos + migración `0003` (`papeleo_expense_items`, `tipo_documento`, nombre de archivo).
 3. Almacenamiento en Google Drive (el usuario crea una carpeta y la comparte como editor con la cuenta de servicio).
