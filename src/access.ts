@@ -1,10 +1,25 @@
-import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 // Sin I, L, O, 0 ni 1 para evitar confusiones al dictar o copiar. 31^12 ≈ 7,9·10^17 combinaciones.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 12;
 
-/** Código nuevo con formato XXXX-XXXX-XXXX. */
+/** Cuánto vive el enlace de invitación y cuánto el ticket que se genera con él. */
+export const INVITATION_TTL_HOURS = 24;
+export const TICKET_TTL_MINUTES = 15;
+
+/** Token del enlace de invitación: 256 bits aleatorios en base64url (43 caracteres). */
+export function generateInviteToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export const INVITE_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** Ticket nuevo con formato XXXX-XXXX-XXXX (el mismo formato que canjea el bot). */
 export function generateCode(): string {
   const raw = Array.from({ length: CODE_LENGTH }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8)}`;

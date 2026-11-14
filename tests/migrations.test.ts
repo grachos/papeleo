@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
@@ -11,6 +12,9 @@ let db: PGlite;
 const ORG_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const ORG_B = "bbbbbbbb-0000-4000-8000-000000000002";
 let n = 0;
+const ORG_L = "eeeeeeee-0000-4000-8000-000000000005";
+const LEGACY_HASH = randomBytes(16).toString("hex");
+const rnd = () => randomBytes(16).toString("hex"); // «hashes» aleatorios en cada corrida
 
 async function seedOrg(org: string) {
   await db.query("insert into papeleo_organizations (id, name) values ($1, $2)", [org, `Empresa ${org.slice(0, 1)}`]);
@@ -48,9 +52,15 @@ beforeAll(async () => {
     create table storage.buckets (id text primary key, name text, public boolean);
     create role anon; create role authenticated; create role service_role;`);
   await db.exec(sql("0001_init.sql"));
+  await db.exec(sql("0002_access_codes.sql"));
   await db.exec(sql("0004_query_assistant.sql"));
   await db.exec(sql("0005_harden_like_escape.sql"));
   await db.exec(sql("0006_extraction_usage.sql"));
+
+  // Un código anterior sin usar (de los que no vencían), creado antes de la migración 0008.
+  await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa L')", [ORG_L]);
+  await db.query("insert into papeleo_access_codes (org_id, code_hash) values ($1, $2)", [ORG_L, LEGACY_HASH]);
+  await db.exec(sql("0008_invitations_tickets.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -165,6 +175,136 @@ describe("consumo de la lectura (0006)", () => {
     await db.query("update papeleo_documents set extraction_model = 'claude-opus-5-5', tokens_in = 2100, tokens_out = 900 where id = (select id from papeleo_documents limit 1)");
     const costo = await db.query<any>("select round(sum(tokens_in) * 4.0 / 1e6 + sum(tokens_out) * 20.0 / 1e6, 4) as usd from papeleo_documents where tokens_in is not null");
     expect(Number(costo.rows[0].usd)).toBeCloseTo(0.0264, 4);
+  });
+});
+
+describe("tickets e invitaciones (0008)", () => {
+  const ORG_T = "ffffffff-0000-4000-8000-000000000006";
+  let seeded = false;
+  const seed = async () => {
+    if (seeded) return;
+    await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa T')", [ORG_T]);
+    seeded = true;
+  };
+  const invitation = async (expires = "now() + interval '24 hours'") => {
+    await seed();
+    const token = rnd();
+    const r = await db.query<any>(`insert into papeleo_invitations (org_id, token_hash, note, expires_at) values ($1, $2, 'nota', ${expires}) returning id`, [ORG_T, token]);
+    return { id: r.rows[0].id as string, token };
+  };
+  const issue = (token: string, ticket: string, mins = 15) => db.query<any>("select * from papeleo_issue_ticket($1, $2, $3::int)", [token, ticket, mins]);
+  const redeem = (ticket: string, phone: string) => db.query<any>("select * from papeleo_redeem_code($1, $2, 'Ana')", [ticket, phone]);
+  const inv = async (id: string) => (await db.query<any>("select * from papeleo_invitations where id = $1", [id])).rows[0];
+
+  it("retira los códigos anteriores que no vencían y seguían sin usar", async () => {
+    const r = await db.query<any>("select status from papeleo_access_codes where code_hash = $1", [LEGACY_HASH]);
+    expect(r.rows[0].status).toBe("revocado");
+    expect((await redeem(LEGACY_HASH, "tg:legacy")).rows).toHaveLength(0);
+  });
+
+  it("emite un ticket de 15 minutos y se canjea una sola vez", async () => {
+    const { id, token } = await invitation();
+    const ticket = rnd();
+    const out = await issue(token, ticket);
+    expect(out.rows[0].r_org_name).toBe("Empresa T");
+    const minutos = (new Date(out.rows[0].r_expires_at).getTime() - Date.now()) / 60000;
+    expect(minutos).toBeGreaterThan(14);
+    expect(minutos).toBeLessThanOrEqual(15);
+
+    const first = await redeem(ticket, "tg:ana1");
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0].r_org_name).toBe("Empresa T");
+    expect((await redeem(ticket, "tg:otra")).rows).toHaveLength(0); // un solo uso
+
+    // al vincularse, la invitación se gasta y no puede generar más tickets
+    const row = await inv(id);
+    expect(row.status).toBe("usada");
+    expect(row.used_member_id).toBe(first.rows[0].r_member_id);
+    expect((await issue(token, rnd())).rows).toHaveLength(0);
+  });
+
+  it("un ticket vencido no se puede canjear", async () => {
+    const { token } = await invitation();
+    const ticket = rnd();
+    await issue(token, ticket);
+    await db.query("update papeleo_access_codes set expires_at = now() - interval '1 second' where code_hash = $1", [ticket]);
+    expect((await redeem(ticket, "tg:tarde")).rows).toHaveLength(0);
+  });
+
+  it("generar otro ticket deja sin efecto el anterior (y si se pasa el tiempo se puede volver a intentar)", async () => {
+    const { id, token } = await invitation();
+    const viejo = rnd();
+    const nuevo = rnd();
+    await issue(token, viejo);
+    await db.query("update papeleo_access_codes set expires_at = now() - interval '1 minute' where code_hash = $1", [viejo]);
+    expect((await issue(token, nuevo)).rows).toHaveLength(1); // la invitación sigue vigente
+    expect((await redeem(viejo, "tg:rot1")).rows).toHaveLength(0);
+    expect((await inv(id)).status).toBe("activa"); // el intento fallido no la gasta
+    expect((await redeem(nuevo, "tg:rot1")).rows).toHaveLength(1);
+
+    const a = rnd();
+    const b = rnd();
+    const dos = await invitation();
+    await issue(dos.token, a);
+    await issue(dos.token, b); // renueva sin esperar a que venza
+    expect((await redeem(a, "tg:rot2")).rows).toHaveLength(0);
+    expect((await redeem(b, "tg:rot2")).rows).toHaveLength(1);
+  });
+
+  it("revocar la invitación deja sin efecto su ticket vigente y ya no emite más", async () => {
+    const { id, token } = await invitation();
+    const ticket = rnd();
+    await issue(token, ticket);
+    await db.query("select papeleo_revoke_invitation($1)", [id]);
+    expect((await inv(id)).status).toBe("revocada");
+    expect((await redeem(ticket, "tg:rev")).rows).toHaveLength(0);
+    expect((await issue(token, rnd())).rows).toHaveLength(0);
+  });
+
+  it("una invitación vencida no emite tickets, y el ticket nunca dura más que ella", async () => {
+    const vieja = await invitation("now() - interval '1 minute'");
+    expect((await issue(vieja.token, rnd())).rows).toHaveLength(0);
+
+    const corta = await invitation("now() + interval '5 minutes'");
+    const out = await issue(corta.token, rnd());
+    const minutos = (new Date(out.rows[0].r_expires_at).getTime() - Date.now()) / 60000;
+    expect(minutos).toBeLessThanOrEqual(5);
+  });
+
+  it("no emite con un token desconocido ni con minutos fuera de rango", async () => {
+    expect((await issue(rnd(), rnd())).rows).toHaveLength(0);
+    const { token } = await invitation();
+    await expect(issue(token, rnd(), 0)).rejects.toThrow("minutos_invalidos");
+    await expect(issue(token, rnd(), 61)).rejects.toThrow("minutos_invalidos");
+  });
+
+  it("una persona ya vinculada no puede canjear otro ticket, y el ticket no se pierde", async () => {
+    const a = await invitation();
+    const t1 = rnd();
+    await issue(a.token, t1);
+    await redeem(t1, "tg:doble");
+    const b = await invitation();
+    const t2 = rnd();
+    await issue(b.token, t2);
+    await expect(redeem(t2, "tg:doble")).rejects.toThrow("ya_vinculado");
+    expect((await inv(b.id)).status).toBe("activa"); // revertido: la invitación sigue vigente
+    expect((await redeem(t2, "tg:distinta")).rows).toHaveLength(1);
+  });
+
+  it("anon y authenticated no pueden ejecutar ninguna función; service_role sí", async () => {
+    const fns = [
+      "papeleo_issue_ticket(text, text, integer)",
+      "papeleo_revoke_invitation(uuid)",
+      "papeleo_redeem_code(text, text, text)",
+    ];
+    for (const fn of fns) {
+      for (const [role, esperado] of [["anon", false], ["authenticated", false], ["service_role", true]] as const) {
+        const r = await db.query<any>(`select has_function_privilege('${role}', '${fn}', 'execute') as ok`);
+        expect([role, fn, r.rows[0].ok]).toEqual([role, fn, esperado]);
+      }
+    }
+    const rls = await db.query<any>("select relrowsecurity from pg_class where relname = 'papeleo_invitations'");
+    expect(rls.rows[0].relrowsecurity).toBe(true);
   });
 });
 

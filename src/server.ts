@@ -2,6 +2,7 @@ import express from "express";
 import { AttemptLimiter } from "./access.js";
 import { ClaudeAssistant } from "./assistant.js";
 import { createAdminRouter } from "./admin.js";
+import { createInviteRouter } from "./invite.js";
 import { loadConfig } from "./config.js";
 import { ClaudeExtractor } from "./extract.js";
 import { handleMessage } from "./handler.js";
@@ -40,6 +41,9 @@ const app = express();
 app.set("trust proxy", 1); // Render termina TLS y reenvía la IP real
 
 let botUsername: string | null = null;
+
+// Página pública del enlace de invitación (el token de la ruta es lo único que da acceso).
+app.use(createInviteRouter({ store, botUsername: () => botUsername }));
 
 if (config.adminPassword) {
   app.use(createAdminRouter({ store, password: config.adminPassword, botUsername: () => botUsername }));

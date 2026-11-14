@@ -8,7 +8,7 @@ Asistente de papeleo por mensajería. El usuario envía fotos o PDF de facturas 
 |---|---|
 | Webhook de WhatsApp (firma, idempotencia) | ✅ Hecho, 🕒 sin activar hasta tener el número |
 | Canal de Telegram para pruebas | ✅ Hecho (fotos, PDF, texto, botón «Descartar»); sin probar contra Telegram real |
-| Control de acceso por códigos + panel `/admin` | ✅ Hecho; migración `0002` aplicada el 2026-11-10 en el proyecto `real-samaria` de Supabase |
+| Control de acceso por enlace de invitación + ticket de 15 minutos + panel `/admin` | ✅ Hecho; migración `0002` aplicada el 2026-11-10 en el proyecto `real-samaria` de Supabase |
 | Lectura de comprobantes con Claude (foto/PDF) | ✅ Hecho, **sin probar con una factura real** (los tests usan un lector simulado) |
 | Registro en Supabase (esquema multiempresa, prefijo `papeleo_`) | ✅ Hecho |
 | Detección de duplicados (sha256) | ✅ Hecho |
@@ -37,6 +37,22 @@ El responsable del proyecto dejó todo funcionando el 2026-11-10 y volvió el 20
 4. Seguir la hoja de ruta: renglones de factura (`0003`), Google Drive, base de conocimiento (`0007`), WhatsApp.
 
 **Decisiones abiertas:** reintento automático con otro modelo ante rechazos de seguridad (`fallbacks`); endurecimiento opcional de permisos (`revoke` del permiso por defecto de `anon` sobre las tablas `papeleo_*`); pedirle al modelo que combine consultas para gastar menos en cada pregunta.
+
+## Portal por usuario y acceso con ticket (especificación del 2026-11-14; etapa A en código, B a D por construir)
+
+Pedido del responsable, tal cual:
+- Un **panel que maneja solo el administrador** (`/admin`). El administrador **genera un enlace** para cada usuario; con ese enlace el usuario **genera su ticket**, y **el ticket es la única forma de entrar al bot de Telegram**. El ticket **dura 15 minutos** y es de **un solo uso**. El administrador **puede revocar el acceso**.
+- **Todo lo maneja el usuario desde Telegram**: registrar facturas, consultarlas, **descargarlas en Excel** y **consultarlas en una página HTML**.
+- **Seguridad:** la página HTML **no se puede abrir si no se está autenticado desde Telegram**. Es de **solo lectura**.
+- **El administrador ve todos los registros** y datos de cada usuario.
+
+*Esto reemplaza el código de acceso sin vencimiento actual (ver «Control de acceso») por un ticket de 15 minutos. No es un programa externo ni usa scraping: la referencia de Silogtran (invitación + código de vinculación) solo inspira el flujo de enlace y ticket.*
+
+**Diseño propuesto (pendiente de confirmar y construir por etapas):**
+- *Etapa A, ticket* — **✅ en código** (migración `0008` aplicada y verificada el 2026-11-14; falta fusionar y desplegar; ver «Control de acceso»): enlace de invitación del administrador (vence a las 24 h y se gasta al vincularse) → ticket de 15 minutos y un solo uso → botón «Abrir en Telegram». Solo se guardan hashes.
+- *Etapa B, portal web de solo lectura:* desde el bot, un botón «Abrir mi panel» entrega un enlace de un solo uso (vence en pocos minutos) ligado a su identidad de Telegram; al abrirlo se crea una sesión (cookie `HttpOnly`, `SameSite=Strict`, `Secure`) que se vuelve inválida si el administrador revoca. Sin sesión, la página responde «ábrela desde Telegram». Todo se filtra en el servidor por la empresa de la sesión.
+- *Etapa C, Excel:* el bot manda un `.xlsx` (por periodo) y la web lo ofrece como descarga. Los textos que vienen de facturas se neutralizan contra inyección de fórmulas (celdas que empiezan por `=`, `+`, `-` o `@`).
+- *Etapa D, administrador:* en `/admin`, ver todas las facturas, preguntas, consumo y accesos de cada empresa o persona. Hay que avisar a los usuarios que el administrador puede ver sus registros (Ley 1581 de 2012).
 
 ## Arquitectura
 
@@ -88,24 +104,35 @@ Telegram y WhatsApp son dos **canales intercambiables** sobre el mismo núcleo: 
 
 ### Control de acceso
 
-Solo entra quien canjea un **código de acceso** creado por el administrador. Quien no está vinculado es **ignorado en silencio**: no recibe respuesta, no se gastan créditos de IA y nunca se le muestra su id.
+Solo entra quien canjea un **ticket** y cada ticket nace de un **enlace de invitación** que crea el administrador. Quien no está vinculado es **ignorado en silencio**: no recibe respuesta, no se gastan créditos de IA y nunca se le muestra su id. *(Etapa A del portal por usuario; reemplaza a los antiguos códigos sin vencimiento.)*
 
-- **Códigos:** formato `XXXX-XXXX-XXXX` (12 caracteres aleatorios, ~59 bits, sin `I L O 0 1`). **Un solo uso y sin vencimiento.** Solo el administrador los revoca. En la base se guarda únicamente su hash (sha256); el código en claro se muestra una vez al crearlo.
-- **Canje:** la persona le escribe el código al bot, o abre el enlace `https://t.me/<bot>?start=CODIGO`. Se canjea en una transacción atómica (función SQL `papeleo_redeem_code`): dos personas no pueden usar el mismo código. Quedan vinculadas a la empresa del código.
-- **Límite de intentos:** 5 códigos erróneos por hora y remitente; después ni se consulta la base. Los mensajes que no tienen forma de código no cuentan.
-- **Quitar acceso:** el administrador revoca a la persona (`revoked_at`); desde ese momento es ignorada. Si luego recibe un código nuevo, se reactiva.
-- **Varias personas por empresa:** se crea un código por persona, eligiendo la misma empresa.
+**Flujo**
+1. **El administrador crea un enlace** en `/admin` → «Crear enlace de acceso» (empresa nueva o existente, y una nota). El enlace (`https://papeleo.onrender.com/acceso/<token>`) se muestra **una sola vez**. Vence a las **24 horas**.
+2. **La persona abre el enlace** y pulsa «Generar mi ticket»: ve un ticket `XXXX-XXXX-XXXX` que dura **15 minutos** y sirve **una sola vez**, con un botón «Abrir en Telegram» (`t.me/<bot>?start=TICKET`). Si se le pasa el tiempo, vuelve a abrir el enlace y genera otro; **el ticket anterior queda sin efecto**.
+3. **El bot canjea el ticket** (función SQL atómica `papeleo_redeem_code`). En esa misma transacción la persona queda vinculada a la empresa y **la invitación se gasta**. Con el enlace gastado no se pueden generar más tickets.
+4. **Revocar:** el administrador revoca un enlace pendiente (y su ticket vigente, juntos, en una transacción) o quita el acceso a una persona ya vinculada. Desde ese momento es ignorada; si recibe un enlace nuevo, se reactiva.
 
-**Panel de administración** (`https://papeleo.onrender.com/admin`, en el mismo servicio): entra con `ADMIN_PASSWORD` (mínimo 12 caracteres). Permite crear códigos (empresa nueva o existente, y una nota), revocar códigos sin usar y quitar el acceso a personas ya vinculadas. Sesión de 8 h en cookie `HttpOnly` + `SameSite=Strict` + token CSRF en cada acción; 5 intentos de contraseña fallidos bloquean la IP 15 minutos; todo lo que viene de la base se escapa en el HTML. Sin `ADMIN_PASSWORD` el panel no existe.
+**Por qué el enlace se gasta al entrar y no al generar el ticket:** así un doble clic, un refresco o un ticket vencido no obligan a pedir otro enlace. Mientras el enlace esté vigente, quien lo tiene puede obtener un ticket; por eso vence en 24 h y el administrador ve quién se vinculó.
+
+**Seguridad**
+- El token del enlace son 256 bits aleatorios y solo se guarda su hash (sha256); los tickets también (12 caracteres, ~59 bits, sin `I L O 0 1`). Nada en claro en la base ni en los logs.
+- `GET /acceso/<token>` **nunca cambia nada** (los previsualizadores de enlaces de Telegram, WhatsApp o el correo lo abren); el ticket se genera con `POST`. Un enlace inexistente, vencido, revocado o ya usado recibe **la misma respuesta**, sin pistas, y las direcciones que fallan seguido se frenan (10 fallos por 15 minutos).
+- La página no carga recursos externos, no se guarda en caché, no se indexa y no envía el token como referer (el token va en la ruta).
+- **Límite de intentos en el bot:** 5 tickets erróneos por hora y remitente; después ni se consulta la base. Un ticket vencido o reemplazado se ignora en silencio, igual que cualquier otro mensaje de un desconocido.
+- **Verificación en el proyecto real (2026-11-14):** una sola función de canje (sin copias que se salten el vencimiento); `anon` y `authenticated` reciben «permiso denegado» en las tres funciones y `service_role` sí las ejecuta; RLS activo en `papeleo_invitations`. Con datos temporales en una transacción cancelada (sin dejar nada): el ticket se emitió con 15 minutos, se canjeó una vez y el segundo canje falló; la invitación quedó «usada» y ya no emitió más; un ticket nuevo dejó sin efecto al anterior; revocar anuló el ticket vigente; una invitación vencida no emitió. El linter de Supabase solo agrega el aviso informativo «RLS sin políticas» de la tabla nueva, que es lo buscado.
+- La migración `0008` es aditiva y conserva la firma de `papeleo_redeem_code`; retira los códigos anteriores que seguían sin usar y exige que el ticket no haya vencido. Todas las funciones nuevas solo las ejecuta `service_role`.
+
+**Panel de administración** (`https://papeleo.onrender.com/admin`, en el mismo servicio): entra con `ADMIN_PASSWORD` (mínimo 12 caracteres). Permite crear enlaces, ver su estado (Pendiente, Ticket emitido, Vinculada, Vencida, Revocada), revocar los vigentes y quitar el acceso a personas ya vinculadas. Sesión de 8 h en cookie `HttpOnly` + `SameSite=Strict` + token CSRF en cada acción; 5 intentos de contraseña fallidos bloquean la IP 15 minutos; todo lo que viene de la base se escapa en el HTML. Sin `ADMIN_PASSWORD` el panel no existe.
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) y `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10) y `0008_invitations_tickets.sql` (enlaces de invitación y tickets de 15 minutos; aplicada el 2026-11-14). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
 - `papeleo_query_log`: cada pregunta al asistente (pregunta, respuesta, herramientas usadas, estado `ok`/`sin_respuesta`/`error`, 👍/👎, tokens). Alimenta la memoria de la conversación, el tope diario y el aprendizaje.
-- `papeleo_access_codes`: códigos de acceso (hash, empresa, nota, estado `activo`/`usado`/`revocado`).
+- `papeleo_access_codes`: tickets de acceso (hash, empresa, nota, estado `activo`/`usado`/`revocado`, `expires_at`; los de antes de la `0008` no vencían y se retiraron).
+- `papeleo_invitations`: enlaces de invitación del administrador (hash del token, empresa, nota, estado `activa`/`usada`/`revocada`, vencimiento a las 24 h, ticket vigente y persona vinculada).
 - `papeleo_documents`: archivo recibido (`wa_message_id` único, `sha256`, estado, extracción en JSON).
 - `papeleo_expenses`: gasto registrado (fecha, proveedor, NIT, nº de factura, subtotal, IVA, total, categoría, medio de pago, confianza, estado).
 
@@ -117,6 +144,7 @@ Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos d
 3. **Google Drive para los archivos** (hay 5 TB disponibles). Carpetas privadas `Empresa/AAAA/MM/` y nombre `{tipo}_{proveedor}_{fecha}_{consecutivo}`, p. ej. `fac_exito_2026-11-09_0001.jpg`. Prefijos de tipo: `fac` factura, `rec` recibo, `cc` cuenta de cobro, `tiq` tiquete (lista ajustable). En Supabase se guarda `drive_file_id`, no una ruta. Nada se comparte públicamente: el servidor lee de Drive con la cuenta de servicio y reenvía por el chat.
 4. **Consultas libres en lenguaje natural** (capa 1, ver abajo). ✅ Código hecho: respuestas humanas, memoria de la conversación, registro en `papeleo_query_log`, «¿te sirvió? 👍 👎» y tope diario (migración `0004`, aplicada). **El envío de archivos queda para después de Drive (paso 3)** para no escribirlo dos veces.
 5. **Base de conocimiento** (ver abajo): glosario por empresa, ejemplos aprobados y panel «Aprendizaje» en `/admin` (migración `0007`).
+7. **Portal por usuario y acceso con ticket** (ver la sección con ese nombre): etapas A a D; la prioridad frente a los pasos anteriores está por confirmar.
 6. **Activar WhatsApp** como segundo canal cuando llegue el número (variables `WHATSAPP_*`, webhook de Meta y migración `channel`/`external_id`). Habilita además los PDF por ese canal.
 
 ### Consultas en lenguaje natural
