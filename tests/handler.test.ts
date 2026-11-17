@@ -201,6 +201,17 @@ describe("excel", () => {
     expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("Acótalo");
   });
 
+  it("una petición en lenguaje natural («descargar el reporte en Excel») exporta todo", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    const sendFile = vi.fn(async () => {});
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile });
+    await handleMessage(text("Quiero descargar el reporte de gastos en Excel"), deps);
+    expect(exportExpenses).toHaveBeenCalledWith("o1", {}, 1000);
+    expect(sendFile).toHaveBeenCalledOnce();
+  });
+
   it("si falla la exportación, avisa a la persona en vez de quedarse callada", async () => {
     const { deps, mocks } = makeDeps();
     Object.assign(mocks.store, { exportExpenses: vi.fn(async () => { throw new Error("db"); }) });
