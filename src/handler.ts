@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
-import { construirExcel, EXPORT_MAX_ROWS, parseExportArgs, XLSX_MIME } from "./export.js";
+import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
 import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
-import type { Deps, IncomingMessage, Member, Org } from "./types.js";
+import type { Deps, IncomingMessage, Member, Org, PanelFilters } from "./types.js";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
@@ -72,9 +72,14 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
 
   if (command === "borrar") return discard(member, deps);
 
-  if (["excel", "exportar"].includes(command.split(/\s+/)[0])) return exportExcel(text, member, org, deps);
+  // «excel» con filtros (excel mes 2026-10) es el comando; «Excel de la semana pasada» es una frase libre.
+  const [primera, segunda] = command.split(/\s+/);
+  const FILTROS_COMANDO = ["desde", "hasta", "mes", "rubro", "proveedor"];
+  if (["excel", "exportar"].includes(primera) && (!segunda || FILTROS_COMANDO.includes(segunda))) {
+    return exportExcel(text, member, org, deps);
+  }
   // Frases naturales («quiero descargar el reporte en Excel»): exportan todo; para acotar, el comando con filtros.
-  if (EXCEL_INTENT.test(text)) return exportExcel("excel", member, org, deps);
+  if (EXCEL_INTENT.test(text)) return exportExcelNatural(text, member, org, deps);
 
   if (command.startsWith("hoja")) {
     if (!deps.sheets.enabled) {
@@ -106,24 +111,42 @@ const EXCEL_INTENT = /\b(excel|xlsx|hoja de c[aá]lculo)\b/i;
 
 /** Envía al chat que lo pidió un Excel con sus facturas (y renglones), filtradas. Solo lee; no escribe nada. */
 async function exportExcel(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
+  const parsed = parseExportArgs(text);
+  if (!parsed.ok) return deps.wa.sendText(member.phone, parsed.mensaje);
+  return enviarExcel(member, org, deps, parsed.filters, parsed.descripcion);
+}
+
+/** Frases libres que mencionan Excel: el periodo se interpreta; si no se entiende, no se exporta todo. */
+async function exportExcelNatural(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
+  const today = (deps.today ?? todayBogota)();
+  const periodo = interpretarPeriodo(text, today);
+  if (periodo.tipo === "no_entiendo") {
+    return deps.wa.sendText(
+      member.phone,
+      "No entendí el periodo. Puedes pedirlo así:\n• excel mes 2026-10\n• excel desde 2026-01-01 hasta 2026-03-31\n• excel rubro transporte (o proveedor)\nO dime «excel» para todas tus facturas.",
+    );
+  }
+  if (periodo.tipo === "todo") return enviarExcel(member, org, deps, {}, "de todo el registro");
+  return enviarExcel(member, org, deps, periodo.filters, periodo.descripcion);
+}
+
+/** Consulta, arma el .xlsx y lo envía solo al chat que lo pidió. Solo lee. */
+async function enviarExcel(member: Member, org: Org, deps: Deps, filters: PanelFilters, descripcion: string): Promise<void> {
   const to = member.phone;
   const port = deps.wa;
   if (!port.sendFile) return port.sendText(to, "Por ahora el Excel solo se entrega por Telegram.");
-
   const today = (deps.today ?? todayBogota)();
-  const parsed = parseExportArgs(text);
-  if (!parsed.ok) return port.sendText(to, parsed.mensaje);
 
   try {
-    const rows = await deps.store.exportExpenses(org.id, parsed.filters, EXPORT_MAX_ROWS);
+    const rows = await deps.store.exportExpenses(org.id, filters, EXPORT_MAX_ROWS);
     if (rows === null) {
       return port.sendText(to, `Hay más de ${EXPORT_MAX_ROWS} facturas con ese filtro. Acótalo por fechas (por ejemplo: excel mes 2026-01) y vuelve a pedirlo.`);
     }
-    if (rows.length === 0) return port.sendText(to, `No encontré facturas ${parsed.descripcion}.`);
+    if (rows.length === 0) return port.sendText(to, `No encontré facturas ${descripcion}.`);
 
     const items = await deps.store.itemsForExpenses(org.id, rows.map((r) => r.id));
     const data = await construirExcel(rows, items);
-    await port.sendFile(to, { name: `papeleo_${today}.xlsx`, mime: XLSX_MIME, data }, `Facturas ${parsed.descripcion}: ${rows.length}.`);
+    await port.sendFile(to, { name: `papeleo_${today}.xlsx`, mime: XLSX_MIME, data }, `Facturas ${descripcion}: ${rows.length}.`);
   } catch (err) {
     // Solo el código de estado: los textos de error pueden traer detalles de la base o de la API.
     console.error("Fallo armando el Excel", (err as { status?: number }).status ?? "sin_estado");

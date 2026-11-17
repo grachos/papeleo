@@ -205,3 +205,85 @@ function formatearHoja(ws: ExcelJS.Worksheet, dinero: string[]) {
   ws.getColumn("fecha").numFmt = "yyyy-mm-dd";
   for (const key of dinero) ws.getColumn(key).numFmt = "#,##0";
 }
+
+// --- Periodos en lenguaje natural («antes de noviembre», «de enero a marzo») -------------------
+
+export type PeriodoNatural =
+  | { tipo: "todo" }
+  | { tipo: "filtros"; filters: PanelFilters; descripcion: string }
+  | { tipo: "no_entiendo" };
+
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const MES_NOMBRE = `(${MESES.join("|")}|setiembre)`;
+
+const quitarTildes = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+const diasDelMes = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+const fechaISO = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const numeroMes = (nombre: string) => (nombre === "setiembre" ? 9 : MESES.indexOf(nombre) + 1);
+
+/**
+ * Interpreta el periodo de una frase libre. Lo que no entiende (semanas, «ayer», rubros, proveedores,
+ * fechas sueltas) NO se exporta completo: se pide usar el comando con filtros.
+ * Un mes sin año usa el año actual, o el anterior si ese mes aún no ha llegado.
+ */
+export function interpretarPeriodo(texto: string, hoy: string): PeriodoNatural {
+  const n = quitarTildes(texto);
+  const [hy, hm] = hoy.split("-").map(Number);
+
+  if (/\d{4}-\d{2}-\d{2}/.test(n)) return { tipo: "no_entiendo" };
+  if (/\b(semana|ayer|hoy|trimestre|quincena|hace|dias?|anos?|anio|rubro|categoria|proveedor)\b/.test(n)) return { tipo: "no_entiendo" };
+
+  const anioExplicito = n.match(/\b(20\d{2})\b/);
+  const anio = anioExplicito ? Number(anioExplicito[1]) : undefined;
+  const anioDelMes = (mes: number) => anio ?? (mes > hm ? hy - 1 : hy);
+  const rango = (desde: string, hasta: string, descripcion: string): PeriodoNatural => ({
+    tipo: "filtros",
+    filters: { desde, hasta },
+    descripcion,
+  });
+  const mesCompleto = (y: number, m: number) => rango(fechaISO(y, m, 1), fechaISO(y, m, diasDelMes(y, m)), `de ${fechaISO(y, m, 1).slice(0, 7)}`);
+
+  if (/\beste mes\b/.test(n)) return mesCompleto(hy, hm);
+  if (/\bmes pasado\b/.test(n)) return hm === 1 ? mesCompleto(hy - 1, 12) : mesCompleto(hy, hm - 1);
+
+  const deAmes = n.match(new RegExp(`\\b(?:de|desde) ${MES_NOMBRE} (?:a|hasta|y) ${MES_NOMBRE}\\b`));
+  if (deAmes) {
+    const m1 = numeroMes(deAmes[1]);
+    const m2 = numeroMes(deAmes[2]);
+    const y1 = anioDelMes(m1);
+    const y2 = y1 + (m2 < m1 ? 1 : 0);
+    return rango(fechaISO(y1, m1, 1), fechaISO(y2, m2, diasDelMes(y2, m2)), `de ${fechaISO(y1, m1, 1).slice(0, 7)} a ${fechaISO(y2, m2, 1).slice(0, 7)}`);
+  }
+
+  const antes = n.match(new RegExp(`\\bantes de ${MES_NOMBRE}\\b`));
+  if (antes) {
+    let m = numeroMes(antes[1]) - 1;
+    let y = anioDelMes(numeroMes(antes[1]));
+    if (m === 0) {
+      m = 12;
+      y -= 1;
+    }
+    return { tipo: "filtros", filters: { hasta: fechaISO(y, m, diasDelMes(y, m)) }, descripcion: `hasta ${fechaISO(y, m, diasDelMes(y, m))}` };
+  }
+
+  const despues = n.match(new RegExp(`\\bdespues de ${MES_NOMBRE}\\b`));
+  if (despues) {
+    let m = numeroMes(despues[1]) + 1;
+    let y = anioDelMes(numeroMes(despues[1]));
+    if (m === 13) {
+      m = 1;
+      y += 1;
+    }
+    return { tipo: "filtros", filters: { desde: fechaISO(y, m, 1) }, descripcion: `desde ${fechaISO(y, m, 1)}` };
+  }
+
+  const unMes = n.match(new RegExp(`\\b${MES_NOMBRE}\\b`));
+  if (unMes) {
+    const m = numeroMes(unMes[1]);
+    return mesCompleto(anioDelMes(m), m);
+  }
+
+  // Palabras de periodo que no supimos interpretar: no exportar todo en silencio.
+  if (/\b(antes|despues|desde|hasta|mes|meses)\b/.test(n)) return { tipo: "no_entiendo" };
+  return { tipo: "todo" };
+}
