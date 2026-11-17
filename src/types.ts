@@ -1,3 +1,4 @@
+import type { ExpenseItem } from "./items.js";
 import type { Extraction } from "./extract.js";
 
 export interface Org {
@@ -15,6 +16,8 @@ export interface Member {
 
 export interface Expense {
   id: string;
+  /** Renglones de la factura; solo viene en el detalle de un gasto. */
+  items?: ExpenseItem[];
   fecha: string;
   proveedor: string | null;
   nit: string | null;
@@ -76,7 +79,7 @@ export interface StorePort {
   hashExists(orgId: string, sha256: string): Promise<boolean>;
   saveFile(orgId: string, documentId: string, data: Buffer, mime: string, sha256: string): Promise<void>;
   finishDocument(documentId: string, status: string, extraction?: Extraction, usage?: Usage): Promise<void>;
-  saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense): Promise<Expense>;
+  saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense, items?: ExpenseItem[] | null): Promise<Expense>;
   /** Marca el gasto como descartado; sin expenseId descarta el último del miembro. */
   discardExpense(memberId: string, expenseId?: string): Promise<Expense | null>;
   listExpenses(orgId: string, from: string, to: string): Promise<Expense[]>;

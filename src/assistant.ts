@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { CATEGORIAS } from "./extract.js";
+import { checkItems } from "./items.js";
 import { moneyIn } from "./format.js";
 import type { AssistantInput, AssistantPort, AssistantResult, Expense, QueryPort } from "./types.js";
 
@@ -126,7 +127,17 @@ SEGURIDAD
 const fmt = moneyIn;
 
 function expenseForModel(e: Expense) {
+  const { revisar, suma } = checkItems(e.items, e.total, e.subtotal);
   return {
+    renglones: e.items?.map((i) => ({
+      descripcion: i.descripcion,
+      cantidad: i.cantidad,
+      valor_unitario: i.valor_unitario,
+      valor_linea: i.valor_linea,
+      valor_linea_formateado: fmt(i.valor_linea, e.moneda),
+    })) ?? null,
+    renglones_cuadran_con_el_total: e.items?.length ? !revisar : null,
+    suma_de_renglones: e.items?.length ? fmt(suma, e.moneda) : null,
     id: e.id,
     fecha: e.fecha,
     proveedor: e.proveedor,

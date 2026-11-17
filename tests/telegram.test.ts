@@ -157,7 +157,7 @@ describe("loadConfig", () => {
     expect(withEnv({ ...tg, LLAMA_CLOUD_API_KEY: "llx", OPENAI_API_KEY: "k" }).extractionProvider).toBe("llamaparse");
     expect(withEnv({ ...tg, LLAMA_CLOUD_API_KEY: "llx", OPENAI_API_KEY: "k", EXTRACTION_PROVIDER: "anthropic" }).extractionProvider).toBe("anthropic");
     const c = withEnv({ ...tg, OPENAI_API_KEY: "k" });
-    expect(c.llamaParseTier).toBe("cost_effective");
+    expect(c.llamaParseTier).toBe("agentic");
     expect(c.openaiExtractionModel).toBe("gpt-5.4-mini");
   });
 

@@ -92,7 +92,7 @@ export function loadConfig() {
     // Lectura de facturas: LlamaParse convierte a texto y OpenAI llena los campos. Claude queda de respaldo.
     extractionProvider: extractionProvider(),
     llamaCloudApiKey: process.env.LLAMA_CLOUD_API_KEY || null,
-    llamaParseTier: process.env.LLAMA_PARSE_TIER || "cost_effective",
+    llamaParseTier: process.env.LLAMA_PARSE_TIER || "agentic", // el nivel de análisis completo con IA para facturas
     openaiExtractionModel: process.env.OPENAI_EXTRACTION_MODEL || "gpt-5.4-mini",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
     googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || null,

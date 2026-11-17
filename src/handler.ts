@@ -234,7 +234,7 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
       medio_pago: extraction.medio_pago,
       descripcion: extraction.descripcion,
       confianza: extraction.confianza,
-    });
+    }, extraction.items);
     await deps.store.finishDocument(documentId, "procesado", extraction, usage);
 
     let note = "";

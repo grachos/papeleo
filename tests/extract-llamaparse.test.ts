@@ -9,7 +9,7 @@ const CLAVE = `llx-${randomBytes(12).toString("hex")}`; // distinta en cada corr
 const lectura: Extraction = {
   es_comprobante: true, tipo: "recibo", proveedor: "Conjunto Residencial", nit: null, numero_factura: null, fecha: "2026-04-16",
   subtotal: null, iva: null, total: 380000, moneda: "COP", medio_pago: "efectivo", categoria: "otros",
-  descripcion: "Administración abril", confianza: "alta",
+  descripcion: "Administración abril", confianza: "alta", items: null,
 };
 
 function parseClient(pages: unknown[] = [{ success: true, page_number: 1, markdown: "# Conjunto\n| Total | 380.000 |" }]) {
