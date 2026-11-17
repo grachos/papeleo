@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
+import type { Extraction } from "./extract.js";
+import { fechaLeida, leerRespuestaFecha, normalizarNit } from "./invoice-key.js";
 import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
 import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
-import type { Deps, IncomingMessage, Member, Org, PanelFilters } from "./types.js";
+import type { Deps, IncomingMessage, Member, Org, PanelFilters, Usage } from "./types.js";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
@@ -102,6 +104,17 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
   if (command === "panel" || command === "web") return openPanel(member, deps);
 
   if (["start", "ayuda", "help", "menu", "menú"].includes(command)) return deps.wa.sendText(member.phone, HELP);
+
+  // Si quedó una factura esperando su fecha y la persona responde una fecha, se completa.
+  const hoy = (deps.today ?? todayBogota)();
+  const fechaDada = leerRespuestaFecha(text, hoy);
+  if (fechaDada) {
+    const pendiente = await deps.store.pendingDate(org.id, member.id).catch((err) => {
+      console.error("No se pudo consultar la fecha pendiente", (err as { status?: number }).status ?? "sin_estado");
+      return null;
+    });
+    if (pendiente) return completarFecha(pendiente, fechaDada, member, org, deps);
+  }
 
   return askAssistant(text, member, org, deps);
 }
@@ -283,40 +296,94 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
       );
     }
 
-    const today = (deps.today ?? todayBogota)();
-    const fecha = extraction.fecha && /^\d{4}-\d{2}-\d{2}$/.test(extraction.fecha) ? extraction.fecha : today;
-    const expense = await deps.store.saveExpense(org.id, member.id, documentId, {
-      fecha,
-      proveedor: extraction.proveedor,
-      nit: extraction.nit,
-      numero_factura: extraction.numero_factura,
-      subtotal: extraction.subtotal,
-      iva: extraction.iva,
-      total: extraction.total,
-      moneda: extraction.moneda || "COP",
-      categoria: extraction.categoria,
-      medio_pago: extraction.medio_pago,
-      descripcion: extraction.descripcion,
-      confianza: extraction.confianza,
-    }, extraction.items);
-    await deps.store.finishDocument(documentId, "procesado", extraction, usage);
-
-    let note = "";
-    if (org.sheet_id && deps.sheets.enabled) {
-      try {
-        await deps.sheets.appendExpense(org.sheet_id, expense, member.name ?? member.phone);
-      } catch (err) {
-        console.error("Fallo al escribir en Google Sheets", err);
-        note = "\n\n⚠️ Quedó guardado, pero no pude copiarlo a tu hoja de Google. Revisa que siga compartida.";
-      }
-    }
-
-    await deps.wa.sendButtons(to, expenseMessage(expense) + note, [
-      { id: DISCARD_PREFIX + expense.id, title: "Descartar" },
-    ]);
+    return procesarLectura(org, member, documentId, extraction, usage, fechaLeida(extraction.fecha), deps);
   } catch (err) {
     console.error("Fallo procesando el documento", documentId, err);
     await deps.store.finishDocument(documentId, "error").catch(() => {});
     await deps.wa.sendText(to, "Tuve un problema procesando ese archivo. Inténtalo de nuevo en unos minutos.");
   }
 }
+
+/**
+ * Lo que pasa con una lectura ya hecha: duplicado (mismo número de factura y NIT), fecha (si falta, se pregunta)
+ * y guardado. Lo usa la foto recién leída y también la fecha que responde la persona después.
+ */
+async function procesarLectura(
+  org: Org,
+  member: Member,
+  documentId: string,
+  extraction: Extraction,
+  usage: Usage | undefined,
+  fecha: string | null,
+  deps: Deps,
+): Promise<void> {
+  const to = member.phone;
+  const numero = extraction.numero_factura?.trim() || null;
+  const nit = normalizarNit(extraction.nit);
+  if (numero && nit) {
+    const previa = (await deps.store.expensesWithNumber(org.id, numero)).find((e) => normalizarNit(e.nit) === nit);
+    if (previa) {
+      await deps.store.finishDocument(documentId, "duplicado", extraction, usage);
+      return deps.wa.sendText(
+        to,
+        `Esa factura ya estaba registrada (número ${numero}, NIT ${extraction.nit}, fecha ${previa.fecha}), así que no la dupliqué.`,
+      );
+    }
+  }
+
+  if (!fecha) {
+    await deps.store.finishDocument(documentId, "sin_fecha", extraction, usage);
+    const total = extraction.total !== null ? ` por ${money(extraction.total)}` : "";
+    return deps.wa.sendText(
+      to,
+      `Pude leer la factura de ${extraction.proveedor ?? "un proveedor"}${total}, pero no encontré la fecha. ¿Cuál fue? Escríbemela como AAAA-MM-DD (por ejemplo 2026-11-10), o escribe «hoy» si es de hoy.`,
+    );
+  }
+
+  const expense = await deps.store.saveExpense(org.id, member.id, documentId, {
+    fecha,
+    proveedor: extraction.proveedor,
+    nit: extraction.nit,
+    numero_factura: extraction.numero_factura,
+    subtotal: extraction.subtotal,
+    iva: extraction.iva,
+    total: extraction.total ?? 0,
+    moneda: extraction.moneda || "COP",
+    categoria: extraction.categoria,
+    medio_pago: extraction.medio_pago,
+    descripcion: extraction.descripcion,
+    confianza: extraction.confianza,
+  }, extraction.items);
+  await deps.store.finishDocument(documentId, "procesado", extraction, usage);
+
+  let note = "";
+  if (org.sheet_id && deps.sheets.enabled) {
+    try {
+      await deps.sheets.appendExpense(org.sheet_id, expense, member.name ?? member.phone);
+    } catch (err) {
+      console.error("Fallo al escribir en Google Sheets", err);
+      note = "\n\n⚠️ Quedó guardado, pero no pude copiarlo a tu hoja de Google. Revisa que siga compartida.";
+    }
+  }
+
+  await deps.wa.sendButtons(to, expenseMessage(expense) + note, [
+    { id: DISCARD_PREFIX + expense.id, title: "Descartar" },
+  ]);
+}
+
+/** La persona responde la fecha de una factura que quedó pendiente. Completa el gasto con la lectura ya guardada. */
+async function completarFecha(
+  pendiente: { documentId: string; extraction: Extraction },
+  fecha: string,
+  member: Member,
+  org: Org,
+  deps: Deps,
+): Promise<void> {
+  try {
+    return await procesarLectura(org, member, pendiente.documentId, pendiente.extraction, undefined, fecha, deps);
+  } catch (err) {
+    console.error("Fallo completando la fecha de una factura", (err as { status?: number }).status ?? "sin_estado");
+    return deps.wa.sendText(member.phone, "Tuve un problema guardando la factura. Inténtalo de nuevo en unos minutos.");
+  }
+}
+

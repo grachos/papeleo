@@ -92,6 +92,10 @@ export interface StorePort {
   /** Marca el gasto como descartado; sin expenseId descarta el último del miembro. */
   discardExpense(memberId: string, expenseId?: string): Promise<Expense | null>;
   listExpenses(orgId: string, from: string, to: string): Promise<Expense[]>;
+  /** Gastos registrados con ese número de factura (para no duplicar). */
+  expensesWithNumber(orgId: string, numero: string): Promise<Expense[]>;
+  /** Factura leída sin fecha, pendiente de que la persona la diga; null si no hay. */
+  pendingDate(orgId: string, memberId: string): Promise<{ documentId: string; extraction: Extraction } | null>;
   /** Facturas registradas de la empresa que cumplen los filtros; null si superan el tope (hay que acotar las fechas). */
   exportExpenses(orgId: string, filters: PanelFilters, max: number): Promise<Expense[] | null>;
   /** Renglones de varios gastos de la empresa, agrupados por id de gasto. */

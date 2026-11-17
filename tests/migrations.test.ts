@@ -63,6 +63,7 @@ beforeAll(async () => {
   await db.query("insert into papeleo_access_codes (org_id, code_hash) values ($1, $2)", [ORG_L, LEGACY_HASH]);
   await db.exec(sql("0008_invitations_tickets.sql"));
   await db.exec(sql("0009_web_panel.sql"));
+  await db.exec(sql("0010_document_status_sin_fecha.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -540,5 +541,21 @@ describe("permisos", () => {
     expect(r.rows.every((x: any) => x.prosecdef === false)).toBe(true);
     const rls = await db.query<any>("select relrowsecurity from pg_class where relname = 'papeleo_query_log'");
     expect(rls.rows[0].relrowsecurity).toBe(true);
+  });
+});
+
+describe("estado sin_fecha de los documentos (0010)", () => {
+  const ORG_F = "ffffffff-0000-4000-8000-000000000010";
+  const MEM_F = "ffffffff-0000-4000-8000-000000000011";
+  it("acepta el estado sin_fecha y sigue rechazando estados inválidos", async () => {
+    await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa F')", [ORG_F]);
+    await db.query("insert into papeleo_members (id, org_id, phone) values ($1, $2, 'tg:777')", [MEM_F, ORG_F]);
+    await db.query(
+      "insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type, status) values ($1, $2, 'wa-f1', 'image/jpeg', 'sin_fecha')",
+      [ORG_F, MEM_F],
+    );
+    await expect(
+      db.query("insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type, status) values ($1, $2, 'wa-f2', 'image/jpeg', 'otro')", [ORG_F, MEM_F]),
+    ).rejects.toThrow();
   });
 });
