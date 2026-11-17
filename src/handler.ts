@@ -73,6 +73,8 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
   if (command === "borrar") return discard(member, deps);
 
   if (["excel", "exportar"].includes(command.split(/\s+/)[0])) return exportExcel(text, member, org, deps);
+  // Frases naturales («quiero descargar el reporte en Excel»): exportan todo; para acotar, el comando con filtros.
+  if (EXCEL_INTENT.test(text)) return exportExcel("excel", member, org, deps);
 
   if (command.startsWith("hoja")) {
     if (!deps.sheets.enabled) {
@@ -98,6 +100,9 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
 
   return askAssistant(text, member, org, deps);
 }
+
+/** Menciones de Excel en lenguaje natural. «hoja de cálculo» va aquí antes que el comando «hoja» de Google Sheets. */
+const EXCEL_INTENT = /\b(excel|xlsx|hoja de c[aá]lculo)\b/i;
 
 /** Envía al chat que lo pidió un Excel con sus facturas (y renglones), filtradas. Solo lee; no escribe nada. */
 async function exportExcel(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
