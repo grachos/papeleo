@@ -212,6 +212,25 @@ describe("excel", () => {
     expect(sendFile).toHaveBeenCalledOnce();
   });
 
+  it("«antes de noviembre» exporta solo el periodo pedido, no todo", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Me puedes bajar un Excel con las facturas registradas antes de noviembre"), deps);
+    expect(exportExpenses).toHaveBeenCalledWith("o1", { hasta: "2026-10-31" }, 1000);
+  });
+
+  it("un periodo que no entiende pide reformular y no exporta", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => []);
+    Object.assign(mocks.store, { exportExpenses });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Excel de la semana pasada"), deps);
+    expect(exportExpenses).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No entendí el periodo");
+  });
+
   it("si falla la exportación, avisa a la persona en vez de quedarse callada", async () => {
     const { deps, mocks } = makeDeps();
     Object.assign(mocks.store, { exportExpenses: vi.fn(async () => { throw new Error("db"); }) });

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { construirExcel, neutralizar, parseExportArgs } from "../src/export.js";
+import { construirExcel, interpretarPeriodo, neutralizar, parseExportArgs } from "../src/export.js";
 import { todasLasPaginas } from "../src/paginate.js";
 import { TelegramClient } from "../src/telegram.js";
 import type { Expense } from "../src/types.js";
@@ -64,6 +64,45 @@ describe("parseExportArgs", () => {
 
   it("limita el largo del proveedor", () => {
     expect(parseExportArgs(`excel proveedor ${"x".repeat(61)}`).ok).toBe(false);
+  });
+});
+
+describe("interpretarPeriodo (frases libres)", () => {
+  const HOY = "2026-11-17";
+
+  it("«antes de noviembre» trae hasta el 31 de octubre", () => {
+    expect(interpretarPeriodo("Me puedes bajar un Excel con las facturas registradas antes de noviembre", HOY)).toMatchObject({
+      tipo: "filtros",
+      filters: { hasta: "2026-10-31" },
+    });
+  });
+
+  it("«de enero a marzo» cubre el rango completo", () => {
+    expect(interpretarPeriodo("Excel de enero a marzo", HOY)).toMatchObject({
+      tipo: "filtros",
+      filters: { desde: "2026-01-01", hasta: "2026-03-31" },
+    });
+  });
+
+  it("un mes suelto, «después de» y «el mes pasado»", () => {
+    expect(interpretarPeriodo("excel en octubre", HOY)).toMatchObject({ filters: { desde: "2026-10-01", hasta: "2026-10-31" } });
+    expect(interpretarPeriodo("excel después de octubre", HOY)).toMatchObject({ filters: { desde: "2026-11-01" } });
+    expect(interpretarPeriodo("el reporte del mes pasado en Excel", HOY)).toMatchObject({ filters: { desde: "2026-10-01", hasta: "2026-10-31" } });
+  });
+
+  it("un mes que aún no llega se toma del año anterior", () => {
+    expect(interpretarPeriodo("excel de diciembre", HOY)).toMatchObject({ filters: { desde: "2025-12-01", hasta: "2025-12-31" } });
+  });
+
+  it("sin periodo exporta todo", () => {
+    expect(interpretarPeriodo("Quiero descargar el reporte de gastos en Excel", HOY)).toEqual({ tipo: "todo" });
+  });
+
+  it("lo que no entiende no se exporta completo: pregunta", () => {
+    expect(interpretarPeriodo("el Excel de la semana pasada", HOY).tipo).toBe("no_entiendo");
+    expect(interpretarPeriodo("Excel de ayer", HOY).tipo).toBe("no_entiendo");
+    expect(interpretarPeriodo("Excel solo del rubro transporte", HOY).tipo).toBe("no_entiendo");
+    expect(interpretarPeriodo("Excel desde 2026-01-01", HOY).tipo).toBe("no_entiendo");
   });
 });
 
