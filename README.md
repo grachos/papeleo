@@ -52,7 +52,14 @@ Pedido del responsable, tal cual:
 **Diseño propuesto (pendiente de confirmar y construir por etapas):**
 - *Etapa A, ticket* — **✅ en vivo desde el 2026-11-14** (ver «Control de acceso»): enlace de invitación del administrador (vence a las 24 h y se gasta al vincularse) → ticket de 15 minutos y un solo uso → botón «Abrir en Telegram». Solo se guardan hashes.
 - *Etapa B, portal web de solo lectura* — **✅ en código** (migración `0009` aplicada el 2026-11-14; falta fusionar y desplegar; ver «Panel web»): el bot entrega un enlace de entrada de un solo uso y 5 minutos; al abrirlo se crea una sesión guardada en la base (30 min de inactividad, 8 h como máximo) que se corta en cuanto el administrador revoca a la persona.
-- *Etapa C, Excel:* el bot manda un `.xlsx` (por periodo) y la web lo ofrece como descarga. Los textos que vienen de facturas se neutralizan contra inyección de fórmulas (celdas que empiezan por `=`, `+`, `-` o `@`).
+- *Etapa C, Excel* — **✅ en código (2026-11-17), pendiente de fusionar y desplegar.** Comando `excel` (o `exportar`) en Telegram, con filtros opcionales:
+  - `excel` (todo), `excel mes 2026-01`, `excel desde 2026-01-01 hasta 2026-03-31`, `excel rubro transporte` (los rubros válidos son los de `CATEGORIAS`; tildes y espacios se aceptan), `excel proveedor Éxito`. Se combinan.
+  - El archivo tiene dos hojas: **Facturas** (fecha, proveedor, NIT, número, rubro, medio de pago, descripción, subtotal, IVA, total, moneda, confianza y una columna «Revisar» si los renglones no cuadran) y **Renglones** (fecha y proveedor de cada factura junto a su concepto, cantidad, valor unitario y valor de línea). Encabezados en negrita, fila de encabezado fija y filtros automáticos.
+  - Se envía **solo al chat que lo pidió**, como documento de Telegram (`sendDocument`). El nombre es `papeleo_AAAA-MM-DD.xlsx`.
+  - **Tope de 1000 facturas por archivo**: si hay más, el bot pide acotar por fechas.
+  - Solo lee: consulta con la misma función del panel (`papeleo_panel_listar`, por páginas de 50) y los renglones por `papeleo_expense_items`. No requiere migración.
+  - Los textos que vienen de facturas se neutralizan contra inyección de fórmulas: si empiezan por `=`, `+`, `-`, `@`, tabulador o retorno, se les antepone una comilla simple (`'`), que se verá en la celda.
+  - **WhatsApp:** por ahora no envía archivos; responde que el Excel se entrega por Telegram (`MessengerPort.sendFile` es opcional).
 - *Etapa D, administrador:* en `/admin`, ver todas las facturas, preguntas, consumo y accesos de cada empresa o persona. Hay que avisar a los usuarios que el administrador puede ver sus registros (Ley 1581 de 2012).
 
 ## Arquitectura
@@ -82,7 +89,7 @@ Telegram y WhatsApp son dos **canales intercambiables** sobre el mismo núcleo: 
 
 ### Canal de Telegram (temporal)
 
-- Es un bot normal de Telegram (sin Meta ni App Review). Acepta **fotos y PDF**, comandos (`/resumen`, `/borrar`, `/hoja`) y el botón «Descartar» como teclado en línea. Los textos se parten en trozos de ≤4000 caracteres.
+- Es un bot normal de Telegram (sin Meta ni App Review). Acepta **fotos y PDF**, comandos (`/resumen`, `/borrar`, `/hoja`, `/excel`) y el botón «Descartar» como teclado en línea. Los textos se parten en trozos de ≤4000 caracteres.
 - Ruta propia `POST /telegram/webhook`. Telegram no firma el cuerpo: autentica con el `secret_token` que se le dio en `setWebhook`, enviado en la cabecera `X-Telegram-Bot-Api-Secret-Token` (se compara en tiempo constante).
 - Idempotencia: el id del mensaje es `tg:<update_id>` (`message_id` solo es único por chat).
 - Los usuarios se guardan en `papeleo_members.phone` con el prefijo `tg:` y el id del chat (sin migración). Cuando llegue WhatsApp conviene una migración que separe `channel` y `external_id`.

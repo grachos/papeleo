@@ -486,6 +486,43 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
     return res.data ? toExpense(res.data) : null;
   }
 
+  /** Facturas para el Excel: reutiliza la misma consulta del panel, por páginas de 50 (tope de la función SQL). */
+  async exportExpenses(orgId: string, filters: PanelFilters, max: number): Promise<Expense[] | null> {
+    const pageSize = 50;
+    const rows: Expense[] = [];
+    for (let page = 1; ; page++) {
+      const { rows: part, total } = await this.list(orgId, filters, page, pageSize);
+      if (total > max) return null;
+      rows.push(...part);
+      if (part.length === 0 || rows.length >= total) return rows;
+    }
+  }
+
+  /** Renglones de varios gastos de la empresa (por tandas de 100 ids), agrupados por gasto y en su orden. */
+  async itemsForExpenses(orgId: string, expenseIds: string[]): Promise<Map<string, ExpenseItem[]>> {
+    const out = new Map<string, ExpenseItem[]>();
+    for (let i = 0; i < expenseIds.length; i += 100) {
+      const res = await this.db
+        .from("papeleo_expense_items")
+        .select("expense_id, descripcion, cantidad, valor_unitario, valor_linea")
+        .eq("org_id", orgId)
+        .in("expense_id", expenseIds.slice(i, i + 100))
+        .order("orden");
+      if (res.error) throw res.error;
+      for (const r of res.data as any[]) {
+        const lista = out.get(r.expense_id) ?? [];
+        lista.push({
+          descripcion: r.descripcion,
+          cantidad: r.cantidad === null ? null : Number(r.cantidad),
+          valor_unitario: r.valor_unitario === null ? null : Number(r.valor_unitario),
+          valor_linea: Number(r.valor_linea),
+        });
+        out.set(r.expense_id, lista);
+      }
+    }
+    return out;
+  }
+
   async listExpenses(orgId: string, from: string, to: string) {
     const res = await this.db
       .from("papeleo_expenses")
