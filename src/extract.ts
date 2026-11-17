@@ -28,7 +28,7 @@ export const ExtractionSchema = z.object({
   tipo: z.enum(["factura_electronica", "tiquete_pos", "recibo", "cuenta_cobro", "comprobante_transferencia", "otro"]),
   proveedor: z.string().nullable().describe("Razón social o nombre de quien vende o recibe el pago"),
   nit: z.string().nullable().describe("NIT o cédula del proveedor, con dígito de verificación si aparece"),
-  numero_factura: z.string().nullable(),
+  numero_factura: z.string().nullable().describe("Número de la factura, tiquete o recibo: el consecutivo que va con la etiqueta Factura, No., Tiquete, Documento o Consecutivo. No es el NIT, un teléfono, un código de barras ni el CUFE/CUF"),
   fecha: z.string().nullable().describe("Fecha de emisión en formato AAAA-MM-DD"),
   subtotal: z.number().nullable().describe("Valor antes de impuestos, en número sin separadores"),
   iva: z.number().nullable().describe("Valor del IVA en pesos, no el porcentaje"),
@@ -55,7 +55,9 @@ export type Extraction = z.infer<typeof ExtractionSchema>;
 
 export const SYSTEM = `Lees comprobantes de gasto colombianos (facturas electrónicas DIAN, tiquetes POS, recibos manuscritos, cuentas de cobro, comprobantes de Nequi, Daviplata o transferencia) y devuelves sus datos.
 
-Los valores están en pesos colombianos: el punto separa miles y la coma decimales, así que "45.900" es cuarenta y cinco mil novecientos. Las fechas suelen venir como DD/MM/AAAA.
+Los valores están en pesos colombianos: el punto separa miles y la coma decimales, así que "45.900" es cuarenta y cinco mil novecientos. Las fechas suelen venir como DD/MM/AAAA (día primero): devuélvelas como AAAA-MM-DD. Busca la fecha junto a etiquetas como «Fecha», «Fecha de emisión» o «Fecha de venta», y en los tiquetes POS suele estar en el encabezado o cerca del total.
+
+El número de factura o tiquete es el consecutivo que va con etiquetas como «Factura», «No.», «Nro», «Tiquete», «Documento» o «Consecutivo», y en los tiquetes POS suele aparecer en el encabezado o cerca del pie. No lo confundas con el NIT, un teléfono, un código de barras, la resolución de la DIAN ni el CUFE/CUF. Si hay varios números, usa el que lleva la etiqueta de factura o tiquete.
 No inventes datos: si un campo no aparece o no se lee, devuélvelo como null. Si la factura tiene renglones (productos o servicios con su valor), llena items con uno por renglón; si no los tiene, items es null. No inventes renglones ni reconstruyas valores que no se ven. Si el total es dudoso, marca confianza "baja" en vez de adivinar.
 Si la imagen no es un comprobante de gasto, devuelve es_comprobante false y el resto de campos en null o en su valor más neutro.`;
 
