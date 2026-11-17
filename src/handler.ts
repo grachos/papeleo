@@ -197,6 +197,8 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
   if (!documentId) return; // reintento del mismo webhook: ya se está procesando
 
   try {
+    // Aviso inmediato: sin él, la persona no sabe si el archivo llegó mientras se descarga y lee (puede tardar).
+    await deps.wa.sendText(to, "Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.");
     const { data, mimeType } = await deps.wa.downloadMedia(msg.mediaId);
     if (data.length > MAX_BYTES) {
       await deps.store.finishDocument(documentId, "error");

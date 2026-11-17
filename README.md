@@ -89,6 +89,7 @@ Telegram y WhatsApp son dos **canales intercambiables** sobre el mismo núcleo: 
 - **El bot es público**, pero ignora en silencio a cualquiera que no esté vinculado (ver «Control de acceso»).
 - Los textos usan `*negrita*` al estilo WhatsApp; en Telegram se envían sin formato (se quitan los asteriscos).
 - Para fotos borrosas, enviarlas como *archivo* (documento): Telegram comprime las fotos.
+- **Aviso de progreso (2026-11-17):** al recibir una foto o PDF válido, el bot responde de inmediato «Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.» antes de descargar y leer. El resultado llega después en otro mensaje. Si la descarga o la lectura fallan, llega el mensaje de error correspondiente.
 - El token del bot va en la URL de cada llamada a la API de Telegram: no se incluye en errores ni logs.
 
 **Activarlo:**

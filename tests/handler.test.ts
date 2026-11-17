@@ -127,7 +127,15 @@ describe("handleMessage", () => {
     mocks.extractor.extract.mockRejectedValueOnce(new Error("timeout"));
     await handleMessage(photo, deps);
     expect(mocks.store.finishDocument).toHaveBeenCalledWith("d1", "error");
-    expect(mocks.wa.sendText).toHaveBeenCalledOnce();
+    expect(mocks.wa.sendText).toHaveBeenCalledTimes(2); // aviso de lectura + error
+  });
+
+  it("avisa de inmediato que el archivo se está leyendo, antes de procesarlo", async () => {
+    const { deps, mocks } = makeDeps();
+    await handleMessage(photo, deps);
+    const primero = (mocks.wa.sendText.mock.calls[0] as unknown as string[])[1];
+    expect(primero).toContain("Lo estoy leyendo");
+    expect(mocks.wa.sendText.mock.invocationCallOrder[0]).toBeLessThan(mocks.wa.downloadMedia.mock.invocationCallOrder[0]);
   });
 
   it("rechaza tipos de archivo no soportados sin descargarlos", async () => {
