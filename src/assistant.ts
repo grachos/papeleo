@@ -4,8 +4,8 @@ import { CATEGORIAS } from "./extract.js";
 import { moneyIn } from "./format.js";
 import type { AssistantInput, AssistantPort, AssistantResult, Expense, QueryPort } from "./types.js";
 
-const MAX_TOOL_ROUNDS = 4; // vueltas de herramientas por pregunta
-const MAX_TOOL_FAILURES = 2; // parámetros inválidos o fallos de la base antes de rendirse
+export const MAX_TOOL_ROUNDS = 4; // vueltas de herramientas por pregunta
+export const MAX_TOOL_FAILURES = 2; // parámetros inválidos o fallos de la base antes de rendirse
 
 // --- Herramientas -------------------------------------------------------------------------------------------
 // Ningún esquema tiene org_id: la empresa la fija el servidor (ver `runTool`) y la IA no puede elegirla ni cambiarla.
@@ -197,8 +197,8 @@ export interface MessagesClient {
   messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
 }
 
-const NO_PUDE = "No pude responder eso con la información que tengo. ¿Me lo preguntas de otra forma o con más detalle?";
-const PROBLEMA = "Tuve un problema para consultar tus datos. Inténtalo de nuevo en unos minutos.";
+export const NO_PUDE = "No pude responder eso con la información que tengo. ¿Me lo preguntas de otra forma o con más detalle?";
+export const PROBLEMA = "Tuve un problema para consultar tus datos. Inténtalo de nuevo en unos minutos.";
 
 export class ClaudeAssistant implements AssistantPort {
   constructor(

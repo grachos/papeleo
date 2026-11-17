@@ -1,6 +1,7 @@
 import express from "express";
 import { AttemptLimiter } from "./access.js";
 import { ClaudeAssistant } from "./assistant.js";
+import { OpenAIAssistant } from "./assistant-openai.js";
 import { createAdminRouter } from "./admin.js";
 import { createInviteRouter } from "./invite.js";
 import { createPanelRouter } from "./panel.js";
@@ -30,6 +31,16 @@ const store = new SupabaseStore(config.supabase.url, config.supabase.serviceRole
 // Enlace de entrada al panel web: necesita la dirección pública del servicio (no se arma con datos de la petición).
 const publicBase = config.publicUrl?.replace(/\/$/, "") ?? null;
 
+function chatAssistant() {
+  if (config.chatProvider === "openai" && config.openaiApiKey) {
+    return OpenAIAssistant.withKey(config.openaiChatModel, store, config.openaiApiKey);
+  }
+  if (config.chatProvider === "openai") {
+    console.warn("CHAT_PROVIDER=openai pero falta OPENAI_API_KEY: el asistente usa Claude mientras tanto.");
+  }
+  return new ClaudeAssistant(config.queryModel, store);
+}
+
 const deps: Deps = {
   limiter: new AttemptLimiter(5, 60 * 60 * 1000), // 5 códigos erróneos por hora y remitente
   wa: config.whatsapp ? new WhatsAppClient(config.whatsapp) : noWhatsApp,
@@ -44,7 +55,7 @@ const deps: Deps = {
         },
       }
     : undefined,
-  assistant: new ClaudeAssistant(config.queryModel, store),
+  assistant: chatAssistant(),
   dailyCap: config.queryDailyCap,
   extractor: new ClaudeExtractor(config.extractionModel),
   sheets: new GoogleSheets(config.googleServiceAccountJson),

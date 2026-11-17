@@ -124,7 +124,7 @@ describe("loadConfig", () => {
   const base = { SUPABASE_URL: "u", SUPABASE_SERVICE_ROLE_KEY: "k" };
   const withEnv = (env: Record<string, string>) => {
     vi.unstubAllEnvs();
-    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_PASSWORD"]) {
+    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_PASSWORD", "OPENAI_API_KEY", "CHAT_PROVIDER", "OPENAI_CHAT_MODEL"]) {
       vi.stubEnv(k, "");
     }
     for (const [k, v] of Object.entries({ ...base, ...env })) vi.stubEnv(k, v);
@@ -137,6 +137,17 @@ describe("loadConfig", () => {
     expect(c.whatsapp).toBeNull();
     expect(c.telegram?.botToken).toBe("t");
     expect(c.adminPassword).toBeNull();
+  });
+
+  it("elige el proveedor del asistente: OpenAI si hay clave, Claude si no; CHAT_PROVIDER manda", () => {
+    const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
+    expect(withEnv(tg).chatProvider).toBe("anthropic");
+    expect(withEnv({ ...tg, OPENAI_API_KEY: "k" }).chatProvider).toBe("openai");
+    expect(withEnv({ ...tg, OPENAI_API_KEY: "k", CHAT_PROVIDER: "anthropic" }).chatProvider).toBe("anthropic");
+    expect(withEnv({ ...tg, CHAT_PROVIDER: "OpenAI" }).chatProvider).toBe("openai");
+    expect(withEnv({ ...tg, CHAT_PROVIDER: "gemini", OPENAI_API_KEY: "k" }).chatProvider).toBe("openai"); // valor desconocido: se ignora
+    expect(withEnv({ ...tg, OPENAI_API_KEY: "k" }).openaiChatModel).toBe("gpt-5.4-mini");
+    expect(withEnv({ ...tg, OPENAI_API_KEY: "k", OPENAI_CHAT_MODEL: "gpt-5.4-nano" }).openaiChatModel).toBe("gpt-5.4-nano");
   });
 
   it("exige una contraseña de administrador de al menos 12 caracteres", () => {
