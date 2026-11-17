@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { Button, IncomingMessage, MessengerPort } from "./types.js";
+import type { Button, IncomingMessage, MessengerPort, OutgoingFile } from "./types.js";
 
 export const TG_PREFIX = "tg:";
 // Telegram admite 4096 caracteres por mensaje; se deja margen.
@@ -106,6 +106,10 @@ export class TelegramClient implements MessengerPort {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    return this.result(method, res);
+  }
+
+  private async result(method: string, res: Response): Promise<any> {
     const json = (await res.json().catch(() => null)) as any;
     if (!res.ok || !json?.ok) {
       throw new Error(`Telegram ${method} respondió ${res.status}: ${json?.description ?? "sin detalle"}`);
@@ -121,6 +125,15 @@ export class TelegramClient implements MessengerPort {
     for (const part of chunkText(plain(body))) {
       await this.call("sendMessage", { chat_id: this.chat(to), text: part });
     }
+  }
+
+  async sendFile(to: string, file: OutgoingFile, caption: string) {
+    const form = new FormData();
+    form.append("chat_id", this.chat(to));
+    form.append("caption", caption.slice(0, 1024));
+    form.append("document", new Blob([new Uint8Array(file.data)], { type: file.mime }), file.name);
+    const res = await fetch(`${this.api}/sendDocument`, { method: "POST", body: form });
+    await this.result("sendDocument", res);
   }
 
   async sendButtons(to: string, body: string, buttons: Button[]) {

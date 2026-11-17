@@ -53,8 +53,25 @@ describe("página pública del enlace", () => {
     expect(store.issueTicket).toHaveBeenCalledWith(TOKEN);
     expect(html).toContain(TICKET);
     expect(html).toContain("https://t.me/papeleo_bot?start=K7QDM3XP9TWB"); // el ticket va sin guiones en el enlace
+    expect(html).toContain(">https://t.me/papeleo_bot</a>"); // el enlace del bot también se ve como texto
+    expect(html).toContain(TICKET); // y el ticket para pegarlo en el chat
     expect(html).toContain("10:30"); // 15:30 UTC = 10:30 en Colombia
     expect(html).toContain("Panadería &lt;Sol&gt;"); // escapado
+  });
+
+  it("consulta el nombre del bot al momento si no estaba cargado", async () => {
+    const { base } = await start(ok, null);
+    const app = express();
+    app.use(createInviteRouter({ store: { issueTicket: ok }, botUsername: async () => "papeleo_bot" }));
+    await new Promise<void>((r) => { server?.close(() => r()); r(); });
+    const srv = app.listen(0);
+    try {
+      const url = `http://127.0.0.1:${(srv.address() as any).port}`;
+      const html = await (await post(`${url}/acceso/${TOKEN}`)).text();
+      expect(html).toContain("https://t.me/papeleo_bot?start=K7QDM3XP9TWB");
+    } finally {
+      srv.close();
+    }
   });
 
   it("sin usuario del bot muestra solo el ticket", async () => {

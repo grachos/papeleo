@@ -58,6 +58,13 @@ export interface Button {
   title: string;
 }
 
+/** Archivo que se entrega al chat (p. ej. el Excel de facturas). */
+export interface OutgoingFile {
+  name: string;
+  mime: string;
+  data: Buffer;
+}
+
 /** Canal de mensajería (WhatsApp o Telegram). */
 export interface MessengerPort {
   sendText(to: string, body: string): Promise<void>;
@@ -65,6 +72,8 @@ export interface MessengerPort {
   /** Mensaje con un botón que abre un enlace (en canales sin botón de enlace, el enlace va en el texto). */
   sendLink(to: string, body: string, label: string, url: string): Promise<void>;
   downloadMedia(mediaId: string): Promise<{ data: Buffer; mimeType: string }>;
+  /** Envía un archivo. Opcional: un canal que aún no lo soporta no lo define y el servicio lo avisa al usuario. */
+  sendFile?(to: string, file: OutgoingFile, caption: string): Promise<void>;
 }
 
 export type WhatsAppPort = MessengerPort;
@@ -83,6 +92,10 @@ export interface StorePort {
   /** Marca el gasto como descartado; sin expenseId descarta el último del miembro. */
   discardExpense(memberId: string, expenseId?: string): Promise<Expense | null>;
   listExpenses(orgId: string, from: string, to: string): Promise<Expense[]>;
+  /** Facturas registradas de la empresa que cumplen los filtros; null si superan el tope (hay que acotar las fechas). */
+  exportExpenses(orgId: string, filters: PanelFilters, max: number): Promise<Expense[] | null>;
+  /** Renglones de varios gastos de la empresa, agrupados por id de gasto. */
+  itemsForExpenses(orgId: string, expenseIds: string[]): Promise<Map<string, ExpenseItem[]>>;
   setSheet(orgId: string, sheetId: string): Promise<void>;
 }
 

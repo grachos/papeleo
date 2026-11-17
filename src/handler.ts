@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
+import { construirExcel, EXPORT_MAX_ROWS, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
 import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
@@ -71,6 +72,8 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
 
   if (command === "borrar") return discard(member, deps);
 
+  if (["excel", "exportar"].includes(command.split(/\s+/)[0])) return exportExcel(text, member, org, deps);
+
   if (command.startsWith("hoja")) {
     if (!deps.sheets.enabled) {
       return deps.wa.sendText(member.phone, "La conexión con Google Sheets aún no está activa en este servicio.");
@@ -94,6 +97,33 @@ async function handleText(text: string, member: Member, org: Org, deps: Deps): P
   if (["start", "ayuda", "help", "menu", "menú"].includes(command)) return deps.wa.sendText(member.phone, HELP);
 
   return askAssistant(text, member, org, deps);
+}
+
+/** Envía al chat que lo pidió un Excel con sus facturas (y renglones), filtradas. Solo lee; no escribe nada. */
+async function exportExcel(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
+  const to = member.phone;
+  const port = deps.wa;
+  if (!port.sendFile) return port.sendText(to, "Por ahora el Excel solo se entrega por Telegram.");
+
+  const today = (deps.today ?? todayBogota)();
+  const parsed = parseExportArgs(text);
+  if (!parsed.ok) return port.sendText(to, parsed.mensaje);
+
+  try {
+    const rows = await deps.store.exportExpenses(org.id, parsed.filters, EXPORT_MAX_ROWS);
+    if (rows === null) {
+      return port.sendText(to, `Hay más de ${EXPORT_MAX_ROWS} facturas con ese filtro. Acótalo por fechas (por ejemplo: excel mes 2026-01) y vuelve a pedirlo.`);
+    }
+    if (rows.length === 0) return port.sendText(to, `No encontré facturas ${parsed.descripcion}.`);
+
+    const items = await deps.store.itemsForExpenses(org.id, rows.map((r) => r.id));
+    const data = await construirExcel(rows, items);
+    await port.sendFile(to, { name: `papeleo_${today}.xlsx`, mime: XLSX_MIME, data }, `Facturas ${parsed.descripcion}: ${rows.length}.`);
+  } catch (err) {
+    // Solo el código de estado: los textos de error pueden traer detalles de la base o de la API.
+    console.error("Fallo armando el Excel", (err as { status?: number }).status ?? "sin_estado");
+    return port.sendText(to, "No pude armar el Excel. Inténtalo de nuevo en unos minutos.");
+  }
 }
 
 /** Entrega el enlace de un solo uso (5 minutos) para abrir el panel web; solo llega a personas ya vinculadas. */
@@ -197,6 +227,12 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
   if (!documentId) return; // reintento del mismo webhook: ya se está procesando
 
   try {
+    // Aviso inmediato (no fatal): si Telegram falla aquí, el archivo igual se procesa.
+    try {
+      await deps.wa.sendText(to, "Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.");
+    } catch {
+      console.error("No se pudo enviar el aviso de lectura");
+    }
     const { data, mimeType } = await deps.wa.downloadMedia(msg.mediaId);
     if (data.length > MAX_BYTES) {
       await deps.store.finishDocument(documentId, "error");

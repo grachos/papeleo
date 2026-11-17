@@ -6,7 +6,7 @@ import { esc, hora, page, SECURITY_HEADERS } from "./web.js";
 export interface InviteOptions {
   store: InvitePort;
   /** Usuario del bot de Telegram, para armar el enlace «Abrir en Telegram». */
-  botUsername?: () => string | null;
+  botUsername?: () => Promise<string | null> | string | null;
   now?: () => number;
 }
 
@@ -68,15 +68,20 @@ export function createInviteRouter(opts: InviteOptions) {
       return void invalidPage(res);
     }
 
-    const bot = opts.botUsername?.();
-    const deepLink = bot ? `https://t.me/${bot}?start=${issued.ticket.replace(/-/g, "")}` : null;
+    const bot = (await opts.botUsername?.()) || null;
+    const enlaceBot = bot ? `https://t.me/${bot}` : null;
+    const deepLink = enlaceBot ? `${enlaceBot}?start=${issued.ticket.replace(/-/g, "")}` : null;
     res.send(
       page(
         "Papeleo · Tu ticket",
         `<h1>Papeleo</h1><div class="card"><h2>Tu ticket para ${esc(issued.orgName)}</h2>
          <div class="code">${esc(issued.ticket)}</div>
          <p>Sirve hasta las <b>${esc(hora(issued.expiresAt))}</b> (hora de Colombia) y una sola vez.</p>
-         ${deepLink ? `<p><a href="${esc(deepLink)}"><button type="button">Abrir en Telegram</button></a></p><p class="muted">O escríbele este ticket al bot en Telegram.</p>` : `<p>Escríbele este ticket al bot en Telegram.</p>`}
+         ${deepLink && enlaceBot
+           ? `<p><a href="${esc(deepLink)}"><button type="button">Abrir en Telegram</button></a></p>
+         <p>Bot: <a href="${esc(enlaceBot)}">${esc(enlaceBot)}</a></p>
+         <p class="muted">Si lo abres desde otro enlace, entra al bot y escríbele este ticket: <b>${esc(issued.ticket)}</b></p>`
+           : `<p>Entra al bot de Telegram y escríbele este ticket.</p>`}
          <p class="muted">Si se te pasa el tiempo, vuelve a abrir tu enlace y genera otro ticket; el anterior queda sin efecto.</p></div>`,
       ),
     );

@@ -127,7 +127,22 @@ describe("handleMessage", () => {
     mocks.extractor.extract.mockRejectedValueOnce(new Error("timeout"));
     await handleMessage(photo, deps);
     expect(mocks.store.finishDocument).toHaveBeenCalledWith("d1", "error");
-    expect(mocks.wa.sendText).toHaveBeenCalledOnce();
+    expect(mocks.wa.sendText).toHaveBeenCalledTimes(2); // aviso de lectura + error
+  });
+
+  it("si el aviso de lectura no llega a Telegram, igual procesa la factura", async () => {
+    const { deps, saved, mocks } = makeDeps();
+    mocks.wa.sendText.mockRejectedValueOnce(new Error("telegram caído"));
+    await handleMessage(photo, deps);
+    expect(saved).toHaveLength(1);
+  });
+
+  it("avisa de inmediato que el archivo se está leyendo, antes de procesarlo", async () => {
+    const { deps, mocks } = makeDeps();
+    await handleMessage(photo, deps);
+    const primero = (mocks.wa.sendText.mock.calls[0] as unknown as string[])[1];
+    expect(primero).toContain("Lo estoy leyendo");
+    expect(mocks.wa.sendText.mock.invocationCallOrder[0]).toBeLessThan(mocks.wa.downloadMedia.mock.invocationCallOrder[0]);
   });
 
   it("rechaza tipos de archivo no soportados sin descargarlos", async () => {
@@ -152,6 +167,75 @@ describe("handleMessage", () => {
     const { deps, mocks } = makeDeps();
     await handleMessage(text("hoja https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit"), deps);
     expect(mocks.store.setSheet).toHaveBeenCalledWith("o1", "1AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+  });
+});
+
+describe("excel", () => {
+  const fila = { id: "e1", fecha: "2026-01-05", proveedor: "Éxito", nit: null, numero_factura: null, subtotal: 1000, iva: 190, total: 1190, moneda: "COP", categoria: "mercado_hogar", medio_pago: null, descripcion: "Mercado", confianza: "alta" } as Expense;
+
+  it("envía al chat que lo pidió un Excel con el filtro de mes", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    const itemsForExpenses = vi.fn(async () => new Map());
+    const sendFile = vi.fn(async () => {});
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses });
+    Object.assign(mocks.wa, { sendFile });
+
+    await handleMessage(text("excel mes 2026-01"), deps);
+
+    expect(exportExpenses).toHaveBeenCalledWith("o1", { desde: "2026-01-01", hasta: "2026-01-31" }, 1000);
+    expect(sendFile).toHaveBeenCalledOnce();
+    const [to, file, caption] = sendFile.mock.calls[0] as unknown as [string, { name: string; data: Buffer }, string];
+    expect(to).toBe(member.phone);
+    expect(file.name).toBe("papeleo_2026-11-09.xlsx");
+    expect(file.data.subarray(0, 2).toString()).toBe("PK"); // un .xlsx es un zip
+    expect(caption).toContain("1");
+  });
+
+  it("pide acotar cuando hay demasiadas facturas", async () => {
+    const { deps, mocks } = makeDeps();
+    Object.assign(mocks.store, { exportExpenses: vi.fn(async () => null) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("excel"), deps);
+    expect(mocks.wa.sendFile).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("Acótalo");
+  });
+
+  it("si falla la exportación, avisa a la persona en vez de quedarse callada", async () => {
+    const { deps, mocks } = makeDeps();
+    Object.assign(mocks.store, { exportExpenses: vi.fn(async () => { throw new Error("db"); }) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("excel"), deps);
+    expect(mocks.wa.sendFile).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No pude armar el Excel");
+  });
+
+  it("no consulta nada si el filtro no es válido", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => []);
+    Object.assign(mocks.store, { exportExpenses });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("excel rubro chucherias"), deps);
+    expect(exportExpenses).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No conozco el rubro");
+  });
+
+  it("avisa cuando el canal no envía archivos (WhatsApp por ahora)", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => []);
+    Object.assign(mocks.store, { exportExpenses });
+    await handleMessage(text("excel"), deps);
+    expect(exportExpenses).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("solo se entrega por Telegram");
+  });
+
+  it("dice cuando no hay facturas con ese filtro", async () => {
+    const { deps, mocks } = makeDeps();
+    Object.assign(mocks.store, { exportExpenses: vi.fn(async () => []) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("excel proveedor Nadie"), deps);
+    expect(mocks.wa.sendFile).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No encontré facturas");
   });
 });
 

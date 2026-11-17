@@ -63,4 +63,5 @@ export const HELP = [
   "• *borrar*: descarta el último gasto",
   "• *panel*: abre tus facturas en una página web (solo lectura)",
   "• *hoja* + enlace: copia cada gasto a tu hoja de Google",
+  "• *excel*: te envío tus facturas en Excel; puedes filtrar: «excel mes 2026-01», «excel rubro transporte», «excel proveedor Éxito»",
 ].join("\n");
