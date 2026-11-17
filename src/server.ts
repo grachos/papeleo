@@ -87,13 +87,21 @@ app.set("trust proxy", 1); // Render termina TLS y reenvía la IP real
 let botUsername: string | null = null;
 
 // Página pública del enlace de invitación (el token de la ruta es lo único que da acceso).
-app.use(createInviteRouter({ store, botUsername: () => botUsername }));
+// Si el arranque no pudo consultar el nombre del bot, se vuelve a intentar al armar la página (no se queda sin enlace).
+async function currentBotUsername(): Promise<string | null> {
+  if (!botUsername && telegramClient) {
+    botUsername = await telegramClient.getUsername().catch(() => null);
+  }
+  return botUsername;
+}
+
+app.use(createInviteRouter({ store, botUsername: currentBotUsername }));
 
 // Panel web de solo lectura: solo se entra con el enlace que entrega el bot.
 app.use(createPanelRouter({ store, query: store }));
 
 if (config.adminPassword) {
-  app.use(createAdminRouter({ store, password: config.adminPassword, botUsername: () => botUsername }));
+  app.use(createAdminRouter({ store, password: config.adminPassword, botUsername: currentBotUsername }));
 } else {
   console.warn("ADMIN_PASSWORD no está definida: no hay panel de administración y nadie podrá obtener acceso.");
 }

@@ -130,6 +130,13 @@ describe("handleMessage", () => {
     expect(mocks.wa.sendText).toHaveBeenCalledTimes(2); // aviso de lectura + error
   });
 
+  it("si el aviso de lectura no llega a Telegram, igual procesa la factura", async () => {
+    const { deps, saved, mocks } = makeDeps();
+    mocks.wa.sendText.mockRejectedValueOnce(new Error("telegram caído"));
+    await handleMessage(photo, deps);
+    expect(saved).toHaveLength(1);
+  });
+
   it("avisa de inmediato que el archivo se está leyendo, antes de procesarlo", async () => {
     const { deps, mocks } = makeDeps();
     await handleMessage(photo, deps);
@@ -192,6 +199,15 @@ describe("excel", () => {
     await handleMessage(text("excel"), deps);
     expect(mocks.wa.sendFile).not.toHaveBeenCalled();
     expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("Acótalo");
+  });
+
+  it("si falla la exportación, avisa a la persona en vez de quedarse callada", async () => {
+    const { deps, mocks } = makeDeps();
+    Object.assign(mocks.store, { exportExpenses: vi.fn(async () => { throw new Error("db"); }) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("excel"), deps);
+    expect(mocks.wa.sendFile).not.toHaveBeenCalled();
+    expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No pude armar el Excel");
   });
 
   it("no consulta nada si el filtro no es válido", async () => {

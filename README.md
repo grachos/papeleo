@@ -50,14 +50,15 @@ Pedido del responsable, tal cual:
 *Esto reemplaza el código de acceso sin vencimiento actual (ver «Control de acceso») por un ticket de 15 minutos. No es un programa externo ni usa scraping: la referencia de Silogtran (invitación + código de vinculación) solo inspira el flujo de enlace y ticket.*
 
 **Diseño propuesto (pendiente de confirmar y construir por etapas):**
-- *Etapa A, ticket* — **✅ en vivo desde el 2026-11-14** (ver «Control de acceso»): enlace de invitación del administrador (vence a las 24 h y se gasta al vincularse) → ticket de 15 minutos y un solo uso → botón «Abrir en Telegram». Solo se guardan hashes.
+- *Etapa A, ticket* — **✅ en vivo desde el 2026-11-14** (ver «Control de acceso»): enlace de invitación del administrador (vence a las 24 h y se gasta al vincularse) → ticket de 15 minutos y un solo uso → botón «Abrir en Telegram» y, como texto, el enlace del bot (`https://t.me/<bot>`) junto al ticket para pegarlo en el chat. Si al arrancar no se consultó el nombre del bot, la página lo vuelve a pedir. Solo se guardan hashes.
 - *Etapa B, portal web de solo lectura* — **✅ en código** (migración `0009` aplicada el 2026-11-14; falta fusionar y desplegar; ver «Panel web»): el bot entrega un enlace de entrada de un solo uso y 5 minutos; al abrirlo se crea una sesión guardada en la base (30 min de inactividad, 8 h como máximo) que se corta en cuanto el administrador revoca a la persona.
 - *Etapa C, Excel* — **✅ en código (2026-11-17), pendiente de fusionar y desplegar.** Comando `excel` (o `exportar`) en Telegram, con filtros opcionales:
   - `excel` (todo), `excel mes 2026-01`, `excel desde 2026-01-01 hasta 2026-03-31`, `excel rubro transporte` (los rubros válidos son los de `CATEGORIAS`; tildes y espacios se aceptan), `excel proveedor Éxito`. Se combinan.
   - El archivo tiene dos hojas: **Facturas** (fecha, proveedor, NIT, número, rubro, medio de pago, descripción, subtotal, IVA, total, moneda, confianza y una columna «Revisar» si los renglones no cuadran) y **Renglones** (fecha y proveedor de cada factura junto a su concepto, cantidad, valor unitario y valor de línea). Encabezados en negrita, fila de encabezado fija y filtros automáticos.
   - Se envía **solo al chat que lo pidió**, como documento de Telegram (`sendDocument`). El nombre es `papeleo_AAAA-MM-DD.xlsx`.
   - **Tope de 1000 facturas por archivo**: si hay más, el bot pide acotar por fechas.
-  - Solo lee: consulta con la misma función del panel (`papeleo_panel_listar`, por páginas de 50) y los renglones por `papeleo_expense_items`. No requiere migración.
+  - Solo lee: consulta con la misma función del panel (`papeleo_panel_listar`, por páginas de 50) y los renglones por `papeleo_expense_items`, leídos por páginas (`todasLasPaginas`: avanza por lo recibido, no se corta si el servidor limita filas). No requiere migración.
+  - Si la exportación falla, el bot responde «No pude armar el Excel. Inténtalo de nuevo» y registra solo el código de estado.
   - Los textos que vienen de facturas se neutralizan contra inyección de fórmulas: si empiezan por `=`, `+`, `-`, `@`, tabulador o retorno, se les antepone una comilla simple (`'`), que se verá en la celda.
   - **WhatsApp:** por ahora no envía archivos; responde que el Excel se entrega por Telegram (`MessengerPort.sendFile` es opcional).
 - *Etapa D, administrador:* en `/admin`, ver todas las facturas, preguntas, consumo y accesos de cada empresa o persona. Hay que avisar a los usuarios que el administrador puede ver sus registros (Ley 1581 de 2012).
@@ -96,7 +97,7 @@ Telegram y WhatsApp son dos **canales intercambiables** sobre el mismo núcleo: 
 - **El bot es público**, pero ignora en silencio a cualquiera que no esté vinculado (ver «Control de acceso»).
 - Los textos usan `*negrita*` al estilo WhatsApp; en Telegram se envían sin formato (se quitan los asteriscos).
 - Para fotos borrosas, enviarlas como *archivo* (documento): Telegram comprime las fotos.
-- **Aviso de progreso (2026-11-17):** al recibir una foto o PDF válido, el bot responde de inmediato «Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.» antes de descargar y leer. El resultado llega después en otro mensaje. Si la descarga o la lectura fallan, llega el mensaje de error correspondiente.
+- **Aviso de progreso (2026-11-17; el envío es no fatal: si falla, la factura se procesa igual):** al recibir una foto o PDF válido, el bot responde de inmediato «Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.» antes de descargar y leer. El resultado llega después en otro mensaje. Si la descarga o la lectura fallan, llega el mensaje de error correspondiente.
 - El token del bot va en la URL de cada llamada a la API de Telegram: no se incluye en errores ni logs.
 
 **Activarlo:**

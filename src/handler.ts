@@ -109,15 +109,21 @@ async function exportExcel(text: string, member: Member, org: Org, deps: Deps): 
   const parsed = parseExportArgs(text);
   if (!parsed.ok) return port.sendText(to, parsed.mensaje);
 
-  const rows = await deps.store.exportExpenses(org.id, parsed.filters, EXPORT_MAX_ROWS);
-  if (rows === null) {
-    return port.sendText(to, `Hay más de ${EXPORT_MAX_ROWS} facturas con ese filtro. Acótalo por fechas (por ejemplo: excel mes 2026-01) y vuelve a pedirlo.`);
-  }
-  if (rows.length === 0) return port.sendText(to, `No encontré facturas ${parsed.descripcion}.`);
+  try {
+    const rows = await deps.store.exportExpenses(org.id, parsed.filters, EXPORT_MAX_ROWS);
+    if (rows === null) {
+      return port.sendText(to, `Hay más de ${EXPORT_MAX_ROWS} facturas con ese filtro. Acótalo por fechas (por ejemplo: excel mes 2026-01) y vuelve a pedirlo.`);
+    }
+    if (rows.length === 0) return port.sendText(to, `No encontré facturas ${parsed.descripcion}.`);
 
-  const items = await deps.store.itemsForExpenses(org.id, rows.map((r) => r.id));
-  const data = await construirExcel(rows, items);
-  await port.sendFile(to, { name: `papeleo_${today}.xlsx`, mime: XLSX_MIME, data }, `Facturas ${parsed.descripcion}: ${rows.length}.`);
+    const items = await deps.store.itemsForExpenses(org.id, rows.map((r) => r.id));
+    const data = await construirExcel(rows, items);
+    await port.sendFile(to, { name: `papeleo_${today}.xlsx`, mime: XLSX_MIME, data }, `Facturas ${parsed.descripcion}: ${rows.length}.`);
+  } catch (err) {
+    // Solo el código de estado: los textos de error pueden traer detalles de la base o de la API.
+    console.error("Fallo armando el Excel", (err as { status?: number }).status ?? "sin_estado");
+    return port.sendText(to, "No pude armar el Excel. Inténtalo de nuevo en unos minutos.");
+  }
 }
 
 /** Entrega el enlace de un solo uso (5 minutos) para abrir el panel web; solo llega a personas ya vinculadas. */
@@ -221,8 +227,12 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
   if (!documentId) return; // reintento del mismo webhook: ya se está procesando
 
   try {
-    // Aviso inmediato: sin él, la persona no sabe si el archivo llegó mientras se descarga y lee (puede tardar).
-    await deps.wa.sendText(to, "Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.");
+    // Aviso inmediato (no fatal): si Telegram falla aquí, el archivo igual se procesa.
+    try {
+      await deps.wa.sendText(to, "Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.");
+    } catch {
+      console.error("No se pudo enviar el aviso de lectura");
+    }
     const { data, mimeType } = await deps.wa.downloadMedia(msg.mediaId);
     if (data.length > MAX_BYTES) {
       await deps.store.finishDocument(documentId, "error");

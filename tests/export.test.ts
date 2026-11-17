@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { construirExcel, neutralizar, parseExportArgs } from "../src/export.js";
+import { todasLasPaginas } from "../src/paginate.js";
 import { TelegramClient } from "../src/telegram.js";
 import type { Expense } from "../src/types.js";
 
@@ -115,6 +116,26 @@ describe("construirExcel", () => {
     await wb.xlsx.load(buf);
     expect(wb.getWorksheet("Facturas")!.getCell("M2").value).toBe("no");
     expect(wb.getWorksheet("Renglones")!.rowCount).toBe(1); // solo encabezado
+  });
+});
+
+describe("todasLasPaginas", () => {
+  /** Servidor falso que devuelve como mucho `cap` filas por respuesta, como Supabase con su tope. */
+  const servidor = (total: number, cap: number) => async (desde: number, hasta: number) =>
+    Array.from({ length: Math.max(0, Math.min(total, hasta + 1) - desde) }, (_, i) => desde + i).slice(0, cap);
+
+  it("trae todas las filas aunque el servidor limite cada respuesta a 1000", async () => {
+    const filas = await todasLasPaginas(servidor(2500, 1000));
+    expect(filas).toHaveLength(2500);
+  });
+
+  it("no se corta en silencio si el servidor devuelve menos de lo pedido", async () => {
+    const filas = await todasLasPaginas(servidor(700, 300), 1000);
+    expect(filas).toHaveLength(700);
+  });
+
+  it("sin filas devuelve vacío", async () => {
+    expect(await todasLasPaginas(servidor(0, 1000))).toEqual([]);
   });
 });
 

@@ -12,7 +12,7 @@ export interface AdminOptions {
   store: AdminPort;
   password: string;
   /** Usuario del bot de Telegram. */
-  botUsername?: () => string | null;
+  botUsername?: () => Promise<string | null> | string | null;
   now?: () => number;
 }
 

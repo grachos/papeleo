@@ -14,6 +14,7 @@ import {
   WEB_MAX_HOURS,
 } from "./access.js";
 import { invitationState } from "./invitations.js";
+import { todasLasPaginas } from "./paginate.js";
 import type { ExpenseItem } from "./items.js";
 import type {
   AdminInvitation,
@@ -502,14 +503,22 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
   async itemsForExpenses(orgId: string, expenseIds: string[]): Promise<Map<string, ExpenseItem[]>> {
     const out = new Map<string, ExpenseItem[]>();
     for (let i = 0; i < expenseIds.length; i += 100) {
-      const res = await this.db
-        .from("papeleo_expense_items")
-        .select("expense_id, descripcion, cantidad, valor_unitario, valor_linea")
-        .eq("org_id", orgId)
-        .in("expense_id", expenseIds.slice(i, i + 100))
-        .order("orden");
-      if (res.error) throw res.error;
-      for (const r of res.data as any[]) {
+      const tanda = expenseIds.slice(i, i + 100);
+      // Paginado: un proyecto de Supabase devuelve como mucho 1000 filas por respuesta; sin esto, el Excel quedaría incompleto.
+      const filas = await todasLasPaginas(async (desde, hasta) => {
+        const res = await this.db
+          .from("papeleo_expense_items")
+          .select("id, expense_id, descripcion, cantidad, valor_unitario, valor_linea")
+          .eq("org_id", orgId)
+          .in("expense_id", tanda)
+          .order("expense_id")
+          .order("orden")
+          .order("id")
+          .range(desde, hasta);
+        if (res.error) throw res.error;
+        return res.data as any[];
+      });
+      for (const r of filas) {
         const lista = out.get(r.expense_id) ?? [];
         lista.push({
           descripcion: r.descripcion,
