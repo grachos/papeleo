@@ -27,6 +27,12 @@ function positiveInt(name: string, fallback: number): number {
   return n;
 }
 
+function extractionProvider(): "llamaparse" | "anthropic" {
+  const requested = process.env.EXTRACTION_PROVIDER?.trim().toLowerCase();
+  if (requested === "llamaparse" || requested === "anthropic") return requested;
+  return process.env.LLAMA_CLOUD_API_KEY && process.env.OPENAI_API_KEY ? "llamaparse" : "anthropic";
+}
+
 function chatProvider(): "openai" | "anthropic" {
   const requested = process.env.CHAT_PROVIDER?.trim().toLowerCase();
   if (requested === "openai" || requested === "anthropic") return requested;
@@ -83,6 +89,12 @@ export function loadConfig() {
     chatProvider: chatProvider(),
     openaiApiKey: process.env.OPENAI_API_KEY || null,
     openaiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-5.4-mini", // una variable vacía cuenta como no definida
+    // Lectura de facturas: LlamaParse convierte a texto y OpenAI llena los campos. Claude queda de respaldo.
+    extractionProvider: extractionProvider(),
+    llamaCloudApiKey: process.env.LLAMA_CLOUD_API_KEY || null,
+    llamaParseTier: process.env.LLAMA_PARSE_TIER || "cost_effective",
+    openaiExtractionModel: process.env.OPENAI_EXTRACTION_MODEL || "gpt-5.4-mini",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
     googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || null,
   };
 }

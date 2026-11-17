@@ -124,7 +124,7 @@ describe("loadConfig", () => {
   const base = { SUPABASE_URL: "u", SUPABASE_SERVICE_ROLE_KEY: "k" };
   const withEnv = (env: Record<string, string>) => {
     vi.unstubAllEnvs();
-    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_PASSWORD", "OPENAI_API_KEY", "CHAT_PROVIDER", "OPENAI_CHAT_MODEL"]) {
+    for (const k of ["WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_PASSWORD", "OPENAI_API_KEY", "CHAT_PROVIDER", "OPENAI_CHAT_MODEL", "LLAMA_CLOUD_API_KEY", "EXTRACTION_PROVIDER", "LLAMA_PARSE_TIER", "OPENAI_EXTRACTION_MODEL"]) {
       vi.stubEnv(k, "");
     }
     for (const [k, v] of Object.entries({ ...base, ...env })) vi.stubEnv(k, v);
@@ -148,6 +148,17 @@ describe("loadConfig", () => {
     expect(withEnv({ ...tg, CHAT_PROVIDER: "gemini", OPENAI_API_KEY: "k" }).chatProvider).toBe("openai"); // valor desconocido: se ignora
     expect(withEnv({ ...tg, OPENAI_API_KEY: "k" }).openaiChatModel).toBe("gpt-5.4-mini");
     expect(withEnv({ ...tg, OPENAI_API_KEY: "k", OPENAI_CHAT_MODEL: "gpt-5.4-nano" }).openaiChatModel).toBe("gpt-5.4-nano");
+  });
+
+  it("elige la lectura de facturas: LlamaParse solo con ambas claves; si no, Claude; EXTRACTION_PROVIDER manda", () => {
+    const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
+    expect(withEnv(tg).extractionProvider).toBe("anthropic");
+    expect(withEnv({ ...tg, LLAMA_CLOUD_API_KEY: "llx" }).extractionProvider).toBe("anthropic"); // falta OpenAI
+    expect(withEnv({ ...tg, LLAMA_CLOUD_API_KEY: "llx", OPENAI_API_KEY: "k" }).extractionProvider).toBe("llamaparse");
+    expect(withEnv({ ...tg, LLAMA_CLOUD_API_KEY: "llx", OPENAI_API_KEY: "k", EXTRACTION_PROVIDER: "anthropic" }).extractionProvider).toBe("anthropic");
+    const c = withEnv({ ...tg, OPENAI_API_KEY: "k" });
+    expect(c.llamaParseTier).toBe("cost_effective");
+    expect(c.openaiExtractionModel).toBe("gpt-5.4-mini");
   });
 
   it("exige una contraseña de administrador de al menos 12 caracteres", () => {

@@ -136,9 +136,22 @@ Desde esta versión el asistente que responde las preguntas en lenguaje natural 
 
 **Para activarlo en Render:** agregar `OPENAI_API_KEY` (y opcionalmente `OPENAI_CHAT_MODEL`) y redesplegar.
 
-### Lectura de facturas: LlamaParse (pendiente)
+### Lectura de facturas: LlamaParse + OpenAI
 
-La persona confirmó que la herramienta que quería es **LlamaParse** (LlamaIndex), no «OllamaParse». Ollama es otra cosa (modelos que corren en el propio servidor) y no sirve en Render gratis. **LlamaParse solo convierte el documento en texto (OCR y tablas); no extrae los campos.** Para llenar proveedor, NIT, total, IVA y conceptos hace falta además un modelo que estructure ese texto. Pendiente de decidir antes de construirlo: si la lectura será LlamaParse seguido del modelo de OpenAI, y si Claude queda como respaldo. Mientras tanto la lectura de facturas sigue con Claude (`EXTRACTION_MODEL`).
+La persona confirmó que la herramienta era **LlamaParse** (LlamaIndex), no «OllamaParse». Se lee en dos pasos:
+
+1. **LlamaParse** convierte el PDF o la foto en texto y tablas en markdown (OCR). Se usa el SDK oficial `@llamaindex/llama-cloud` y su llamada `parsing.parse` con `expand: ["markdown"]`. Las páginas que no se pudieron leer se descartan.
+2. **Un modelo de OpenAI** (`OPENAI_EXTRACTION_MODEL`, por defecto `gpt-5.4-mini`) llena los campos del comprobante con el mismo esquema de siempre, usando salida estructurada, `store: false` y las mismas instrucciones que la lectura con Claude.
+
+Si LlamaParse o OpenAI **fallan con error** (red, cuota, servicio caído), la lectura pasa a **Claude** (`EXTRACTION_MODEL`), si hay `ANTHROPIC_API_KEY`. Un comprobante sin texto legible **no** activa el respaldo: se registra como «no reconocido».
+
+- **Qué se activa:** `EXTRACTION_PROVIDER=llamaparse` (por defecto cuando hay `LLAMA_CLOUD_API_KEY` **y** `OPENAI_API_KEY`). Sin esas dos claves se sigue leyendo con Claude, y el log lo avisa.
+- **Nivel de LlamaParse:** `LLAMA_PARSE_TIER`, por defecto `cost_effective` (`fast`, `cost_effective`, `agentic`, `agentic_plus`). **Lo que no está verificado:** cuánto cuesta cada nivel y cuál lee mejor facturas borrosas. Es una decisión de costo y calidad que conviene probar con facturas reales.
+- **Privacidad:** cada comprobante se envía a **LlamaCloud** (LlamaIndex) para el OCR y luego su texto a **OpenAI** para llenar los campos. Hay que informarlo en el aviso de privacidad (Ley 1581 de 2012).
+- **Nunca se registra la clave** ni el texto de los errores de las APIs: en el log solo queda el código de estado.
+- **Pendiente:** la prueba con facturas reales. Este entorno no tiene las claves, así que la integración está probada con clientes simulados contra la forma exacta de los SDK oficiales.
+
+**Para activarlo en Render:** agregar `LLAMA_CLOUD_API_KEY` y `OPENAI_API_KEY` (y opcionalmente `LLAMA_PARSE_TIER`) y redesplegar. Las claves las pone el dueño del proyecto.
 
 ### Panel web (etapa B)
 
@@ -311,6 +324,10 @@ Copia `.env.example` a `.env` y completa los valores.
 | `CHAT_PROVIDER` | Proveedor del asistente que habla con la persona: `openai` o `anthropic`. Si no se define: `openai` cuando hay `OPENAI_API_KEY`, y `anthropic` si no |
 | `OPENAI_API_KEY` | Clave de OpenAI para el asistente de conversación (cárgala en Render; nunca en el repo). Si falta y el proveedor es `openai`, el asistente usa Claude y el log lo avisa |
 | `OPENAI_CHAT_MODEL` | Modelo de OpenAI del asistente. Por defecto `gpt-5.4-mini` (ver «Asistente de conversación») |
+| `EXTRACTION_PROVIDER` | Lectura de facturas: `llamaparse` (LlamaParse + OpenAI, con Claude de respaldo) o `anthropic`. Por defecto `llamaparse` si hay `LLAMA_CLOUD_API_KEY` y `OPENAI_API_KEY` |
+| `LLAMA_CLOUD_API_KEY` | Clave de LlamaParse / LlamaCloud (cárgala en Render; nunca en el repo) |
+| `LLAMA_PARSE_TIER` | Nivel de LlamaParse. Por defecto `cost_effective` (ver «Lectura de facturas») |
+| `OPENAI_EXTRACTION_MODEL` | Modelo de OpenAI que llena los campos de la factura. Por defecto `gpt-5.4-mini` |
 | `QUERY_MODEL` | Modelo del asistente de consultas. Por defecto `claude-opus-5-5`; cada pregunta hace 2 a 4 llamadas (ver «Modelo y costo») |
 | `QUERY_DAILY_CAP` | Preguntas máximas por persona y día. Por defecto 40 |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Opcional. JSON de la cuenta de servicio, tal cual o en base64 |

@@ -42,7 +42,7 @@ export const ExtractionSchema = z.object({
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
 
-const SYSTEM = `Lees comprobantes de gasto colombianos (facturas electrónicas DIAN, tiquetes POS, recibos manuscritos, cuentas de cobro, comprobantes de Nequi, Daviplata o transferencia) y devuelves sus datos.
+export const SYSTEM = `Lees comprobantes de gasto colombianos (facturas electrónicas DIAN, tiquetes POS, recibos manuscritos, cuentas de cobro, comprobantes de Nequi, Daviplata o transferencia) y devuelves sus datos.
 
 Los valores están en pesos colombianos: el punto separa miles y la coma decimales, así que "45.900" es cuarenta y cinco mil novecientos. Las fechas suelen venir como DD/MM/AAAA.
 No inventes datos: si un campo no aparece o no se lee, devuélvelo como null. Si el total es dudoso, marca confianza "baja" en vez de adivinar.
