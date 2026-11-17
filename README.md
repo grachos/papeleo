@@ -310,6 +310,10 @@ Objetivo: que el asistente entienda cada vez mejor cómo hablan los usuarios. **
 
 Requiere Node 22.
 
+**Auditoría de dependencias (2026-11-17).** `npm audit` reporta avisos aceptados por el responsable del proyecto; no son errores de código y no se fuerzan versiones para callarlos:
+- **`uuid` < 11.1.1 (2 moderados, producción):** llega por `exceljs@4.4.0`, que lo usa solo como `uuid.v4()` sin búfer. La falla afecta v3/v5/v6 con búfer, así que no aplica aquí. Aceptado; revisar al actualizar `exceljs`.
+- **`picomatch` (5 altos, solo herramientas de prueba: vitest/vite):** sin versión corregida publicada; no afectan al servidor en producción. Aceptado; revisar si sale una versión corregida.
+
 ```bash
 npm install
 npm test        # vitest (incluye pruebas del SQL contra Postgres real en memoria con PGlite)
