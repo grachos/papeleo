@@ -136,6 +136,14 @@ Desde esta versión el asistente que responde las preguntas en lenguaje natural 
 
 **Para activarlo en Render:** agregar `OPENAI_API_KEY` (y opcionalmente `OPENAI_CHAT_MODEL`) y redesplegar.
 
+### Renglones de la factura (detalle por producto)
+
+Cada factura guarda sus **renglones** (producto o servicio, cantidad, valor unitario y valor de línea) cuando el comprobante los muestra. El modelo los extrae con el mismo esquema de lectura (`items`, `null` si el comprobante solo trae el total) y se guardan en la tabla `papeleo_expense_items` (migración `0003`, **pendiente de aplicar**). Mientras no esté aplicada, la factura se guarda igual y los renglones se pierden, con el error registrado en el log.
+
+- **Dónde se ven:** el asistente los incluye al consultar una factura, y el panel los muestra en el detalle con la suma de renglones.
+- **Cuadre:** si la suma de los renglones no coincide con el total ni con el subtotal (tolerancia de 1 peso), la factura se marca para revisar en el detalle del panel y el asistente lo informa.
+- **Privacidad:** los renglones son datos de la factura; viajan con el resto de la lectura a OpenAI y solo los ve el servidor (la tabla no tiene acceso para `anon` ni `authenticated`).
+
 ### Lectura de facturas: LlamaParse + OpenAI
 
 La persona confirmó que la herramienta era **LlamaParse** (LlamaIndex), no «OllamaParse». Se lee en dos pasos:
@@ -146,7 +154,7 @@ La persona confirmó que la herramienta era **LlamaParse** (LlamaIndex), no «Ol
 Si LlamaParse o OpenAI **fallan con error** (red, cuota, servicio caído), la lectura pasa a **Claude** (`EXTRACTION_MODEL`), si hay `ANTHROPIC_API_KEY`. Un comprobante sin texto legible **no** activa el respaldo: se registra como «no reconocido».
 
 - **Qué se activa:** `EXTRACTION_PROVIDER=llamaparse` (por defecto cuando hay `LLAMA_CLOUD_API_KEY` **y** `OPENAI_API_KEY`). Sin esas dos claves se sigue leyendo con Claude, y el log lo avisa.
-- **Nivel de LlamaParse:** `LLAMA_PARSE_TIER`, por defecto `cost_effective` (`fast`, `cost_effective`, `agentic`, `agentic_plus`). **Lo que no está verificado:** cuánto cuesta cada nivel y cuál lee mejor facturas borrosas. Es una decisión de costo y calidad que conviene probar con facturas reales.
+- **Nivel de LlamaParse:** `LLAMA_PARSE_TIER`, por defecto `agentic` (`fast`, `cost_effective`, `agentic`, `agentic_plus`). El SDK describe `agentic` como análisis completo con IA y con instrucciones personalizadas, y lo recomendamos para facturas. **No verificado:** su costo por página, que es más alto que el de `cost_effective`; conviene medirlo con las primeras facturas.
 - **Privacidad:** cada comprobante se envía a **LlamaCloud** (LlamaIndex) para el OCR y luego su texto a **OpenAI** para llenar los campos. Hay que informarlo en el aviso de privacidad (Ley 1581 de 2012).
 - **Nunca se registra la clave** ni el texto de los errores de las APIs: en el log solo queda el código de estado.
 - **Pendiente:** la prueba con facturas reales. Este entorno no tiene las claves, así que la integración está probada con clientes simulados contra la forma exacta de los SDK oficiales.
@@ -176,7 +184,7 @@ Vista **solo de lectura** de las facturas, a la que **solo se entra desde Telegr
 
 ### Base de datos (Supabase)
 
-Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10) `0008_invitations_tickets.sql` (enlaces de invitación y tickets de 15 minutos; aplicada el 2026-11-14) y `0009_web_panel.sql` (enlaces de entrada y sesiones del panel web y la lista paginada; aplicada el 2026-11-14). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
+Migraciones: `0001_init.sql` (esquema base), `0002_access_codes.sql` (códigos de acceso, `revoked_at` en miembros y la función de canje), `0004_query_assistant.sql` (registro de preguntas y funciones de consulta; aplicada el 2026-11-10), `0005_harden_like_escape.sql` (fija el `search_path` de `papeleo_like_escape`; aplicada el 2026-11-10) `0006_extraction_usage.sql` (modelo y tokens de cada lectura en `papeleo_documents`; aplicada el 2026-11-10) `0008_invitations_tickets.sql` (enlaces de invitación y tickets de 15 minutos; aplicada el 2026-11-14) y `0009_web_panel.sql` (enlaces de entrada y sesiones del panel web y la lista paginada; aplicada el 2026-11-14) y `0003_expense_items.sql` (renglones de cada factura; **pendiente de aplicar**). La `0003` está reservada para los renglones de factura. Todas las tablas, índices y el bucket llevan el prefijo `papeleo_` para convivir con otros proyectos en el mismo Supabase.
 
 - `papeleo_organizations`: empresa (y `sheet_id` opcional).
 - `papeleo_members`: personas vinculadas, identificadas por su teléfono de WhatsApp o su id de Telegram con prefijo `tg:` (único); `revoked_at` marca el acceso retirado.
@@ -326,7 +334,7 @@ Copia `.env.example` a `.env` y completa los valores.
 | `OPENAI_CHAT_MODEL` | Modelo de OpenAI del asistente. Por defecto `gpt-5.4-mini` (ver «Asistente de conversación») |
 | `EXTRACTION_PROVIDER` | Lectura de facturas: `llamaparse` (LlamaParse + OpenAI, con Claude de respaldo) o `anthropic`. Por defecto `llamaparse` si hay `LLAMA_CLOUD_API_KEY` y `OPENAI_API_KEY` |
 | `LLAMA_CLOUD_API_KEY` | Clave de LlamaParse / LlamaCloud (cárgala en Render; nunca en el repo) |
-| `LLAMA_PARSE_TIER` | Nivel de LlamaParse. Por defecto `cost_effective` (ver «Lectura de facturas») |
+| `LLAMA_PARSE_TIER` | Nivel de LlamaParse. Por defecto `agentic` (análisis completo con IA; ver «Lectura de facturas») |
 | `OPENAI_EXTRACTION_MODEL` | Modelo de OpenAI que llena los campos de la factura. Por defecto `gpt-5.4-mini` |
 | `QUERY_MODEL` | Modelo del asistente de consultas. Por defecto `claude-opus-5-5`; cada pregunta hace 2 a 4 llamadas (ver «Modelo y costo») |
 | `QUERY_DAILY_CAP` | Preguntas máximas por persona y día. Por defecto 40 |

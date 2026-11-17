@@ -38,6 +38,17 @@ export const ExtractionSchema = z.object({
   categoria: z.enum(CATEGORIAS),
   descripcion: z.string().describe("Resumen de máximo 10 palabras de lo comprado"),
   confianza: z.enum(["alta", "media", "baja"]).describe("Qué tan legibles y seguros son el total y la fecha"),
+  items: z
+    .array(
+      z.object({
+        descripcion: z.string().describe("Producto o servicio tal como aparece en la factura"),
+        cantidad: z.number().nullable().describe("Cantidad, si aparece"),
+        valor_unitario: z.number().nullable().describe("Valor unitario en pesos, si aparece"),
+        valor_linea: z.number().describe("Valor total de este renglón en pesos"),
+      }),
+    )
+    .nullable()
+    .describe("Renglones de la factura, uno por producto o servicio. null si el comprobante solo muestra el total"),
 });
 
 export type Extraction = z.infer<typeof ExtractionSchema>;
@@ -45,7 +56,7 @@ export type Extraction = z.infer<typeof ExtractionSchema>;
 export const SYSTEM = `Lees comprobantes de gasto colombianos (facturas electrónicas DIAN, tiquetes POS, recibos manuscritos, cuentas de cobro, comprobantes de Nequi, Daviplata o transferencia) y devuelves sus datos.
 
 Los valores están en pesos colombianos: el punto separa miles y la coma decimales, así que "45.900" es cuarenta y cinco mil novecientos. Las fechas suelen venir como DD/MM/AAAA.
-No inventes datos: si un campo no aparece o no se lee, devuélvelo como null. Si el total es dudoso, marca confianza "baja" en vez de adivinar.
+No inventes datos: si un campo no aparece o no se lee, devuélvelo como null. Si la factura tiene renglones (productos o servicios con su valor), llena items con uno por renglón; si no los tiene, items es null. No inventes renglones ni reconstruyas valores que no se ven. Si el total es dudoso, marca confianza "baja" en vez de adivinar.
 Si la imagen no es un comprobante de gasto, devuelve es_comprobante false y el resto de campos en null o en su valor más neutro.`;
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;

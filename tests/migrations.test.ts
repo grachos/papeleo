@@ -53,6 +53,7 @@ beforeAll(async () => {
     create role anon; create role authenticated; create role service_role;`);
   await db.exec(sql("0001_init.sql"));
   await db.exec(sql("0002_access_codes.sql"));
+  await db.exec(sql("0003_expense_items.sql"));
   await db.exec(sql("0004_query_assistant.sql"));
   await db.exec(sql("0005_harden_like_escape.sql"));
   await db.exec(sql("0006_extraction_usage.sql"));
@@ -485,6 +486,30 @@ describe("panel web: enlaces de entrada y sesiones (0009)", () => {
     for (const t of ["papeleo_web_logins", "papeleo_web_sessions"]) {
       expect((await db.query<any>("select relrowsecurity from pg_class where relname = $1", [t])).rows[0].relrowsecurity).toBe(true);
     }
+  });
+});
+
+describe("renglones de factura (0003)", () => {
+  it("la tabla cascada con el gasto, separa por empresa y solo la ve el servidor", async () => {
+    const org = "dddddddd-0000-4000-8000-00000000000d";
+    await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa R')", [org]);
+    await db.query("insert into papeleo_members (id, org_id, phone) values ($1, $2, 'tg:r')", ["dddddddd-1111-4111-8111-00000000000d", org]);
+    const doc = (await db.query<any>("insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type) values ($1, $2, 'items-doc', 'image/jpeg') returning id", [org, "dddddddd-1111-4111-8111-00000000000d"])).rows[0].id;
+    const gasto = (await db.query<any>("insert into papeleo_expenses (org_id, member_id, document_id, fecha, total, categoria, confianza) values ($1, $2, $3, '2026-11-01', 1000, 'otros', 'alta') returning id", [org, "dddddddd-1111-4111-8111-00000000000d", doc])).rows[0].id;
+    await db.query("insert into papeleo_expense_items (org_id, expense_id, orden, descripcion, valor_linea) values ($1, $2, 1, 'Pan', 600), ($1, $2, 2, 'Suero', 400)", [org, gasto]);
+
+    const n = await db.query<any>("select count(*)::int as n from papeleo_expense_items where expense_id = $1", [gasto]);
+    expect(n.rows[0].n).toBe(2);
+
+    await db.query("delete from papeleo_expenses where id = $1", [gasto]);
+    const tras = await db.query<any>("select count(*)::int as n from papeleo_expense_items where expense_id = $1", [gasto]);
+    expect(tras.rows[0].n).toBe(0); // se borran con su gasto
+
+    expect((await db.query<any>("select relrowsecurity from pg_class where relname = 'papeleo_expense_items'")).rows[0].relrowsecurity).toBe(true);
+    for (const role of ["anon", "authenticated"]) {
+      expect((await db.query<any>(`select has_table_privilege('${role}', 'papeleo_expense_items', 'select') as ok`)).rows[0].ok).toBe(false);
+    }
+    expect((await db.query<any>("select has_table_privilege('service_role', 'papeleo_expense_items', 'select') as ok")).rows[0].ok).toBe(true);
   });
 });
 

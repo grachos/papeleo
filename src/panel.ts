@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AttemptLimiter, INVITE_TOKEN_RE, WEB_IDLE_MINUTES, WEB_LOGIN_MINUTES, WEB_MAX_HOURS } from "./access.js";
 import { CATEGORIAS } from "./extract.js";
 import { moneyIn } from "./format.js";
+import { checkItems } from "./items.js";
 import type { Expense, PanelFilters, PanelPort, PanelSession, QueryPort } from "./types.js";
 import { esc, getCookie, page, SECURITY_HEADERS } from "./web.js";
 
@@ -35,6 +36,22 @@ const Query = z.object({
 });
 
 const label = (cat: string) => esc(cat.replace(/_/g, " "));
+
+/** Tabla de renglones de la factura, con aviso si no cuadran con el total. Sin renglones, no muestra nada. */
+function renglones(e: Expense): string {
+  if (!e.items || e.items.length === 0) return "";
+  const { revisar, suma } = checkItems(e.items, e.total, e.subtotal);
+  const filas = e.items
+    .map(
+      (i) => `<tr><td>${esc(i.descripcion)}</td><td>${i.cantidad ?? "—"}</td><td>${i.valor_unitario === null ? "—" : esc(moneyIn(i.valor_unitario, e.moneda))}</td><td>${esc(moneyIn(i.valor_linea, e.moneda))}</td></tr>`,
+    )
+    .join("");
+  const aviso = revisar
+    ? `<p class="err">Los renglones suman ${esc(moneyIn(suma, e.moneda))}, que no coincide con el total de la factura. Conviene revisarla.</p>`
+    : `<p class="muted">Los renglones suman ${esc(moneyIn(suma, e.moneda))}, igual al total.</p>`;
+  return `<div class="card"><h2>Detalle de la factura</h2><div class="tablewrap"><table>
+    <tr><th>Producto o servicio</th><th>Cantidad</th><th>Valor unitario</th><th>Valor</th></tr>${filas}</table></div>${aviso}</div>`;
+}
 
 const SALIR = `<form method="post" action="/panel/salir"><button class="link">Salir</button></form>`;
 
@@ -223,6 +240,7 @@ export function createPanelRouter(opts: PanelOptions) {
              ${dato("Total", moneyIn(e.total, e.moneda))}${dato("Categoría", e.categoria.replace(/_/g, " "))}${dato("Medio de pago", e.medio_pago)}
              ${dato("Descripción", e.descripcion)}${dato("Confianza de la lectura", e.confianza)}
            </table></div>
+           ${renglones(e)}
            <p class="muted">Los archivos originales (foto o PDF) todavía no se pueden ver desde el panel.</p>
            <p><a href="/panel">← Volver al panel</a></p></div>`,
         ),

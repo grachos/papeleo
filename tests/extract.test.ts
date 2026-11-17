@@ -3,7 +3,7 @@ import { ClaudeExtractor, type Extraction } from "../src/extract.js";
 
 const lectura: Extraction = {
   es_comprobante: true, tipo: "recibo", proveedor: "Conjunto", nit: null, numero_factura: null, fecha: "2026-04-16",
-  subtotal: null, iva: null, total: 380000, moneda: "COP", medio_pago: "efectivo", categoria: "otros", descripcion: "Administración", confianza: "alta",
+  subtotal: null, iva: null, total: 380000, moneda: "COP", medio_pago: "efectivo", categoria: "otros", descripcion: "Administración", confianza: "alta", items: null,
 };
 
 const fake = (response: object) => {

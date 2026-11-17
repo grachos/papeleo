@@ -14,6 +14,7 @@ import {
   WEB_MAX_HOURS,
 } from "./access.js";
 import { invitationState } from "./invitations.js";
+import type { ExpenseItem } from "./items.js";
 import type {
   AdminInvitation,
   AdminMember,
@@ -144,7 +145,8 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
       .eq("estado", "registrado")
       .maybeSingle();
     if (res.error) throw res.error;
-    return res.data ? toExpense(res.data) : null;
+    if (!res.data) return null;
+    return { ...toExpense(res.data), items: await this.listItems(orgId, id) };
   }
 
   async logQuery(e: QueryLogEntry) {
@@ -239,10 +241,16 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
     if (!rows.length) return [];
 
     const ids = (key: string) => [...new Set(rows.map((r) => r[key]).filter(Boolean))] as string[];
+    // Sin ids no se consulta: un filtro IN vacío (`in.()`) no es una consulta válida para la API.
+    const lookup = async (table: string, cols: string, key: string): Promise<{ data: any[] | null; error: any }> => {
+      const list = ids(key);
+      if (list.length === 0) return { data: [], error: null };
+      return this.db.from(table).select(cols).in("id", list) as unknown as { data: any[] | null; error: any };
+    };
     const [orgs, tickets, members] = await Promise.all([
-      this.db.from("papeleo_organizations").select("id, name").in("id", ids("org_id")),
-      this.db.from("papeleo_access_codes").select("id, status, expires_at").in("id", ids("ticket_id")),
-      this.db.from("papeleo_members").select("id, name").in("id", ids("used_member_id")),
+      lookup("papeleo_organizations", "id, name", "org_id"),
+      lookup("papeleo_access_codes", "id, status, expires_at", "ticket_id"),
+      lookup("papeleo_members", "id, name", "used_member_id"),
     ]);
     for (const r of [orgs, tickets, members]) if (r.error) throw r.error;
     const byId = (list: any[] | null) => new Map((list ?? []).map((x) => [x.id, x]));
@@ -408,14 +416,47 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
     }
   }
 
-  async saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense) {
+  async saveExpense(orgId: string, memberId: string, documentId: string, expense: NewExpense, items?: ExpenseItem[] | null) {
     const res = await this.db
       .from("papeleo_expenses")
       .insert({ ...expense, org_id: orgId, member_id: memberId, document_id: documentId })
       .select(EXPENSE_COLUMNS)
       .single();
     if (res.error) throw res.error;
-    return toExpense(res.data);
+    const saved = toExpense(res.data);
+
+    // Los renglones van aparte y sin romper nada: si falla (p. ej. la tabla aún no existe), el gasto ya quedó guardado.
+    if (items && items.length > 0) {
+      const rows = items.map((i, n) => ({
+        org_id: orgId,
+        expense_id: saved.id,
+        orden: n + 1,
+        descripcion: i.descripcion.slice(0, 200),
+        cantidad: i.cantidad,
+        valor_unitario: i.valor_unitario,
+        valor_linea: i.valor_linea,
+      }));
+      const r = await this.db.from("papeleo_expense_items").insert(rows);
+      if (r.error) console.error("No se pudieron guardar los renglones de la factura", r.error.code ?? "sin_codigo");
+    }
+    return saved;
+  }
+
+  /** Renglones de un gasto de la empresa, en su orden. Vacío si no tiene o si la tabla aún no existe. */
+  async listItems(orgId: string, expenseId: string): Promise<ExpenseItem[]> {
+    const res = await this.db
+      .from("papeleo_expense_items")
+      .select("descripcion, cantidad, valor_unitario, valor_linea")
+      .eq("expense_id", expenseId)
+      .eq("org_id", orgId)
+      .order("orden");
+    if (res.error) return [];
+    return (res.data as any[]).map((r) => ({
+      descripcion: r.descripcion,
+      cantidad: r.cantidad === null ? null : Number(r.cantidad),
+      valor_unitario: r.valor_unitario === null ? null : Number(r.valor_unitario),
+      valor_linea: Number(r.valor_linea),
+    }));
   }
 
   async discardExpense(memberId: string, expenseId?: string) {
