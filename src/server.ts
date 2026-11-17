@@ -1,6 +1,9 @@
 import express from "express";
 import { AttemptLimiter } from "./access.js";
 import { ClaudeAssistant } from "./assistant.js";
+import { OpenAIAssistant } from "./assistant-openai.js";
+import { LlamaParseExtractor, FallbackExtractor } from "./extract-llamaparse.js";
+import LlamaCloud from "@llamaindex/llama-cloud";
 import { createAdminRouter } from "./admin.js";
 import { createInviteRouter } from "./invite.js";
 import { createPanelRouter } from "./panel.js";
@@ -30,6 +33,34 @@ const store = new SupabaseStore(config.supabase.url, config.supabase.serviceRole
 // Enlace de entrada al panel web: necesita la dirección pública del servicio (no se arma con datos de la petición).
 const publicBase = config.publicUrl?.replace(/\/$/, "") ?? null;
 
+function extractorPort() {
+  const claude = config.anthropicApiKey ? new ClaudeExtractor(config.extractionModel) : null;
+  if (config.extractionProvider === "llamaparse" && config.llamaCloudApiKey && config.openaiApiKey) {
+    return new FallbackExtractor(
+      new LlamaParseExtractor(
+        { tier: config.llamaParseTier, model: config.openaiExtractionModel },
+        new LlamaCloud({ apiKey: config.llamaCloudApiKey }) as unknown as import("./extract-llamaparse.js").ParseClient,
+        LlamaParseExtractor.structurerWithKey(config.openaiApiKey),
+      ),
+      claude,
+    );
+  }
+  if (config.extractionProvider === "llamaparse") {
+    console.warn("EXTRACTION_PROVIDER=llamaparse pero faltan LLAMA_CLOUD_API_KEY u OPENAI_API_KEY: se lee con Claude.");
+  }
+  return claude ?? new ClaudeExtractor(config.extractionModel);
+}
+
+function chatAssistant() {
+  if (config.chatProvider === "openai" && config.openaiApiKey) {
+    return OpenAIAssistant.withKey(config.openaiChatModel, store, config.openaiApiKey);
+  }
+  if (config.chatProvider === "openai") {
+    console.warn("CHAT_PROVIDER=openai pero falta OPENAI_API_KEY: el asistente usa Claude mientras tanto.");
+  }
+  return new ClaudeAssistant(config.queryModel, store);
+}
+
 const deps: Deps = {
   limiter: new AttemptLimiter(5, 60 * 60 * 1000), // 5 códigos erróneos por hora y remitente
   wa: config.whatsapp ? new WhatsAppClient(config.whatsapp) : noWhatsApp,
@@ -44,9 +75,9 @@ const deps: Deps = {
         },
       }
     : undefined,
-  assistant: new ClaudeAssistant(config.queryModel, store),
+  assistant: chatAssistant(),
   dailyCap: config.queryDailyCap,
-  extractor: new ClaudeExtractor(config.extractionModel),
+  extractor: extractorPort(),
   sheets: new GoogleSheets(config.googleServiceAccountJson),
 };
 

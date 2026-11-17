@@ -27,6 +27,18 @@ function positiveInt(name: string, fallback: number): number {
   return n;
 }
 
+function extractionProvider(): "llamaparse" | "anthropic" {
+  const requested = process.env.EXTRACTION_PROVIDER?.trim().toLowerCase();
+  if (requested === "llamaparse" || requested === "anthropic") return requested;
+  return process.env.LLAMA_CLOUD_API_KEY && process.env.OPENAI_API_KEY ? "llamaparse" : "anthropic";
+}
+
+function chatProvider(): "openai" | "anthropic" {
+  const requested = process.env.CHAT_PROVIDER?.trim().toLowerCase();
+  if (requested === "openai" || requested === "anthropic") return requested;
+  return process.env.OPENAI_API_KEY ? "openai" : "anthropic";
+}
+
 export function loadConfig() {
   // Cada canal es opcional, pero debe haber al menos uno. Si se define alguna variable de un canal, hacen falta todas las suyas.
   const whatsapp = WHATSAPP_VARS.some((v) => process.env[v])
@@ -72,6 +84,17 @@ export function loadConfig() {
     // Cada pregunta hace de 2 a 4 llamadas: si el costo pesa, QUERY_MODEL puede apuntar a un modelo más económico.
     queryModel: process.env.QUERY_MODEL ?? "claude-opus-5-5",
     queryDailyCap: positiveInt("QUERY_DAILY_CAP", 40),
+    // Proveedor del asistente que habla con la persona. Por defecto OpenAI si hay clave; si no, Claude.
+    // Nunca se cae el servicio por falta de una clave: se usa el otro proveedor y se avisa en el log.
+    chatProvider: chatProvider(),
+    openaiApiKey: process.env.OPENAI_API_KEY || null,
+    openaiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-5.4-mini", // una variable vacía cuenta como no definida
+    // Lectura de facturas: LlamaParse convierte a texto y OpenAI llena los campos. Claude queda de respaldo.
+    extractionProvider: extractionProvider(),
+    llamaCloudApiKey: process.env.LLAMA_CLOUD_API_KEY || null,
+    llamaParseTier: process.env.LLAMA_PARSE_TIER || "cost_effective",
+    openaiExtractionModel: process.env.OPENAI_EXTRACTION_MODEL || "gpt-5.4-mini",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
     googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || null,
   };
 }

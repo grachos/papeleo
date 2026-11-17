@@ -125,6 +125,34 @@ Solo entra quien canjea un **ticket** y cada ticket nace de un **enlace de invit
 
 **Panel de administración** (`https://papeleo.onrender.com/admin`, en el mismo servicio): entra con `ADMIN_PASSWORD` (mínimo 12 caracteres). Permite crear enlaces, ver su estado (Pendiente, Ticket emitido, Vinculada, Vencida, Revocada), revocar los vigentes y quitar el acceso a personas ya vinculadas. Sesión de 8 h en cookie `HttpOnly` + `SameSite=Strict` + token CSRF en cada acción; 5 intentos de contraseña fallidos bloquean la IP 15 minutos; todo lo que viene de la base se escapa en el HTML. Sin `ADMIN_PASSWORD` el panel no existe.
 
+### Asistente de conversación (OpenAI)
+
+Desde esta versión el asistente que responde las preguntas en lenguaje natural puede usar **OpenAI** (API de respuestas con llamadas a funciones, SDK oficial `openai` 7.57.0). Las herramientas, las reglas de seguridad y el bucle acotado son los mismos que con Claude: la empresa la fija el servidor, las herramientas son de solo lectura y la IA no escribe SQL.
+
+- **Modelo por defecto: `gpt-5.4-mini`.** El identificador aparece en los tipos del SDK oficial, así que existe. **Lo que no pude verificar:** el precio oficial. La página de precios de OpenAI no resolvió desde el entorno de desarrollo, y los sitios de terceros dan cifras distintas para el mismo modelo (hay fuentes con $0,25 de entrada y $2,00 de salida por millón, y otras con $0,75 y $4,50). Antes de fiarse de un costo, confirmarlo en la página oficial. El SDK también reconoce `gpt-5.4-nano` (más barato, menos capaz) y `gpt-5.6-luna` / `gpt-6-luna` (no se sabe su precio ni si son los más pequeños).
+- **Privacidad:** `store: false`, para que OpenAI no guarde las conversaciones en su plataforma. Aun así, **las preguntas y los resultados de las consultas se envían a OpenAI**: hay que informarlo a los usuarios en el aviso de privacidad (Ley 1581 de 2012).
+- **Cambiar de proveedor** es una variable: `CHAT_PROVIDER=anthropic` vuelve al asistente de Claude, que sigue en el código.
+- **Costo:** cada pregunta hace de 2 a 4 llamadas al modelo; el tope diario (`QUERY_DAILY_CAP`) sigue aplicando.
+
+**Para activarlo en Render:** agregar `OPENAI_API_KEY` (y opcionalmente `OPENAI_CHAT_MODEL`) y redesplegar.
+
+### Lectura de facturas: LlamaParse + OpenAI
+
+La persona confirmó que la herramienta era **LlamaParse** (LlamaIndex), no «OllamaParse». Se lee en dos pasos:
+
+1. **LlamaParse** convierte el PDF o la foto en texto y tablas en markdown (OCR). Se usa el SDK oficial `@llamaindex/llama-cloud` y su llamada `parsing.parse` con `expand: ["markdown"]`. Las páginas que no se pudieron leer se descartan.
+2. **Un modelo de OpenAI** (`OPENAI_EXTRACTION_MODEL`, por defecto `gpt-5.4-mini`) llena los campos del comprobante con el mismo esquema de siempre, usando salida estructurada, `store: false` y las mismas instrucciones que la lectura con Claude.
+
+Si LlamaParse o OpenAI **fallan con error** (red, cuota, servicio caído), la lectura pasa a **Claude** (`EXTRACTION_MODEL`), si hay `ANTHROPIC_API_KEY`. Un comprobante sin texto legible **no** activa el respaldo: se registra como «no reconocido».
+
+- **Qué se activa:** `EXTRACTION_PROVIDER=llamaparse` (por defecto cuando hay `LLAMA_CLOUD_API_KEY` **y** `OPENAI_API_KEY`). Sin esas dos claves se sigue leyendo con Claude, y el log lo avisa.
+- **Nivel de LlamaParse:** `LLAMA_PARSE_TIER`, por defecto `cost_effective` (`fast`, `cost_effective`, `agentic`, `agentic_plus`). **Lo que no está verificado:** cuánto cuesta cada nivel y cuál lee mejor facturas borrosas. Es una decisión de costo y calidad que conviene probar con facturas reales.
+- **Privacidad:** cada comprobante se envía a **LlamaCloud** (LlamaIndex) para el OCR y luego su texto a **OpenAI** para llenar los campos. Hay que informarlo en el aviso de privacidad (Ley 1581 de 2012).
+- **Nunca se registra la clave** ni el texto de los errores de las APIs: en el log solo queda el código de estado.
+- **Pendiente:** la prueba con facturas reales. Este entorno no tiene las claves, así que la integración está probada con clientes simulados contra la forma exacta de los SDK oficiales.
+
+**Para activarlo en Render:** agregar `LLAMA_CLOUD_API_KEY` y `OPENAI_API_KEY` (y opcionalmente `LLAMA_PARSE_TIER`) y redesplegar. Las claves las pone el dueño del proyecto.
+
 ### Panel web (etapa B)
 
 Vista **solo de lectura** de las facturas, a la que **solo se entra desde Telegram**: no tiene usuario ni contraseña propios.
@@ -293,6 +321,13 @@ Copia `.env.example` a `.env` y completa los valores.
 | `SUPABASE_BUCKET` | Por defecto `papeleo-documentos` (se reemplazará por Drive) |
 | `ANTHROPIC_API_KEY` | Lectura de facturas y consultas |
 | `EXTRACTION_MODEL` | Modelo que lee las facturas. Por defecto en el código `claude-opus-5-5`; **en Render está en `claude-haiku-5-5` desde el 2026-11-14** (ver «Modelo y costo») |
+| `CHAT_PROVIDER` | Proveedor del asistente que habla con la persona: `openai` o `anthropic`. Si no se define: `openai` cuando hay `OPENAI_API_KEY`, y `anthropic` si no |
+| `OPENAI_API_KEY` | Clave de OpenAI para el asistente de conversación (cárgala en Render; nunca en el repo). Si falta y el proveedor es `openai`, el asistente usa Claude y el log lo avisa |
+| `OPENAI_CHAT_MODEL` | Modelo de OpenAI del asistente. Por defecto `gpt-5.4-mini` (ver «Asistente de conversación») |
+| `EXTRACTION_PROVIDER` | Lectura de facturas: `llamaparse` (LlamaParse + OpenAI, con Claude de respaldo) o `anthropic`. Por defecto `llamaparse` si hay `LLAMA_CLOUD_API_KEY` y `OPENAI_API_KEY` |
+| `LLAMA_CLOUD_API_KEY` | Clave de LlamaParse / LlamaCloud (cárgala en Render; nunca en el repo) |
+| `LLAMA_PARSE_TIER` | Nivel de LlamaParse. Por defecto `cost_effective` (ver «Lectura de facturas») |
+| `OPENAI_EXTRACTION_MODEL` | Modelo de OpenAI que llena los campos de la factura. Por defecto `gpt-5.4-mini` |
 | `QUERY_MODEL` | Modelo del asistente de consultas. Por defecto `claude-opus-5-5`; cada pregunta hace 2 a 4 llamadas (ver «Modelo y costo») |
 | `QUERY_DAILY_CAP` | Preguntas máximas por persona y día. Por defecto 40 |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Opcional. JSON de la cuenta de servicio, tal cual o en base64 |
