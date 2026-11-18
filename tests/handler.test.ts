@@ -4,10 +4,12 @@ import type { Extraction } from "../src/extract.js";
 import { monthRange, summaryMessage } from "../src/format.js";
 import { handleMessage } from "../src/handler.js";
 import { parseSheetId } from "../src/sheets.js";
+import type { Extraction } from "../src/extract.js";
 import type { Deps, Expense, IncomingMessage } from "../src/types.js";
 import { parseWebhook, verifySignature } from "../src/whatsapp.js";
 
 const member = { id: "m1", org_id: "o1", phone: "573001112233", name: "Ana" };
+const saved0 = { id: "x", fecha: "2026-11-03", proveedor: "Éxito", nit: "900155107", numero_factura: "A123", subtotal: 38571, iva: 7329, total: 45900, moneda: "COP", categoria: "mercado_hogar", medio_pago: "tarjeta_debito", descripcion: "Mercado", confianza: "alta" } as Expense;
 const org = { id: "o1", name: "Ana", sheet_id: null as string | null };
 
 const usage = { model: "claude-opus-5-5", tokensIn: 2100, tokensOut: 900 };
@@ -52,6 +54,8 @@ function makeDeps(over: { extraction?: Extraction | null; sheetId?: string | nul
       discardExpense: vi.fn(async () => saved[0] ?? null),
       listExpenses: vi.fn(async () => saved),
       setSheet: vi.fn(async () => {}),
+      expensesWithNumber: vi.fn(async () => [] as Expense[]),
+      pendingDate: vi.fn(async () => null as { documentId: string; extraction: Extraction } | null),
     },
     extractor: { extract: vi.fn(async () => ({ extraction: over.extraction === undefined ? extraction : over.extraction, usage })) },
     sheets: { enabled: true, serviceAccountEmail: "bot@x.iam", appendExpense: vi.fn(async () => {}) },
@@ -108,10 +112,53 @@ describe("handleMessage", () => {
     expect(mocks.store.finishDocument.mock.calls[0][3]).toEqual(usage); // el consumo se registra aunque no se haya leído nada
   });
 
-  it("usa la fecha de hoy cuando el comprobante no trae fecha", async () => {
-    const { deps, saved } = makeDeps({ extraction: { ...extraction, fecha: null } });
+  it("si la factura no trae fecha, no la guarda: pregunta la fecha a la persona", async () => {
+    const { deps, saved, mocks } = makeDeps({ extraction: { ...extraction, fecha: null } });
     await handleMessage(photo, deps);
+    expect(saved).toHaveLength(0);
+    expect(mocks.store.finishDocument.mock.calls[0][1]).toBe("sin_fecha");
+    expect((mocks.wa.sendText.mock.calls.at(-1) as unknown as string[])[1]).toContain("no encontré la fecha");
+  });
+
+  it("no duplica una factura con el mismo número y el mismo NIT (el NIT se compara sin dígito de verificación)", async () => {
+    const { deps, saved, mocks } = makeDeps({ extraction: { ...extraction, nit: "900.155.107-1", numero_factura: "202443" } });
+    mocks.store.expensesWithNumber.mockResolvedValueOnce([{ ...saved0, nit: "900155107", numero_factura: "202443", fecha: "2026-11-03" } as Expense]);
+    await handleMessage(photo, deps);
+    expect(mocks.store.saveExpense).not.toHaveBeenCalled();
+    expect(mocks.store.finishDocument.mock.calls[0][1]).toBe("duplicado");
+    expect((mocks.wa.sendText.mock.calls.at(-1) as unknown as string[])[1]).toContain("ya estaba registrada");
+    expect(saved).toHaveLength(0);
+  });
+
+  it("sí registra si el número coincide pero el NIT es otro proveedor", async () => {
+    const { deps, saved, mocks } = makeDeps({ extraction: { ...extraction, nit: "900.155.107-1", numero_factura: "202443" } });
+    mocks.store.expensesWithNumber.mockResolvedValueOnce([{ ...saved0, nit: "900195107-2", numero_factura: "202443", fecha: "2026-11-03" } as Expense]);
+    await handleMessage(photo, deps);
+    expect(saved).toHaveLength(1);
+  });
+
+  it("la fecha que responde la persona completa la factura pendiente sin volver a leer el archivo", async () => {
+    const { deps, mocks, saved } = makeDeps();
+    mocks.store.pendingDate.mockResolvedValueOnce({ documentId: "d9", extraction: { ...extraction, fecha: null } });
+    await handleMessage(text("10/11/2026"), deps);
+    expect(mocks.extractor.extract).not.toHaveBeenCalled();
+    expect(saved[0].fecha).toBe("2026-11-10");
+    expect(mocks.store.finishDocument).toHaveBeenCalledWith("d9", "procesado", expect.anything(), undefined);
+  });
+
+  it("«hoy» como respuesta completa la factura con la fecha de hoy", async () => {
+    const { deps, mocks, saved } = makeDeps();
+    mocks.store.pendingDate.mockResolvedValueOnce({ documentId: "d9", extraction: { ...extraction, fecha: null } });
+    await handleMessage(text("hoy"), deps);
     expect(saved[0].fecha).toBe("2026-11-09");
+  });
+
+  it("un texto que no es fecha no completa nada: va al asistente", async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.store.pendingDate.mockResolvedValueOnce({ documentId: "d9", extraction: { ...extraction, fecha: null } });
+    await handleMessage(text("cuánto gasté este mes"), deps);
+    expect(mocks.store.pendingDate).not.toHaveBeenCalled();
+    expect(mocks.store.saveExpense).not.toHaveBeenCalled();
   });
 
   it("copia el gasto a la hoja de Google y avisa si falla sin perder el registro", async () => {

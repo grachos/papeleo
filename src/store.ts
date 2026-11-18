@@ -532,6 +532,35 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
     return out;
   }
 
+  /** Gastos registrados de la empresa con ese número de factura; el handler compara el NIT. */
+  async expensesWithNumber(orgId: string, numero: string): Promise<Expense[]> {
+    const res = await this.db
+      .from("papeleo_expenses")
+      .select(EXPENSE_COLUMNS)
+      .eq("org_id", orgId)
+      .eq("estado", "registrado")
+      .eq("numero_factura", numero);
+    if (res.error) throw res.error;
+    return res.data.map(toExpense);
+  }
+
+  /** Factura leída sin fecha de esta persona en las últimas 24 horas (la lectura ya está guardada); null si no hay. */
+  async pendingDate(orgId: string, memberId: string): Promise<{ documentId: string; extraction: Extraction } | null> {
+    const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await this.db
+      .from("papeleo_documents")
+      .select("id, extraction")
+      .eq("org_id", orgId)
+      .eq("member_id", memberId)
+      .eq("status", "sin_fecha")
+      .gte("created_at", desde)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (res.error) throw res.error;
+    const fila = res.data[0] as { id: string; extraction: Extraction | null } | undefined;
+    return fila?.extraction ? { documentId: fila.id, extraction: fila.extraction } : null;
+  }
+
   async listExpenses(orgId: string, from: string, to: string) {
     const res = await this.db
       .from("papeleo_expenses")
