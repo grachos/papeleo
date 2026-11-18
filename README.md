@@ -100,6 +100,7 @@ Telegram y WhatsApp son dos **canales intercambiables** sobre el mismo núcleo: 
 - **El bot es público**, pero ignora en silencio a cualquiera que no esté vinculado (ver «Control de acceso»).
 - Los textos usan `*negrita*` al estilo WhatsApp; en Telegram se envían sin formato (se quitan los asteriscos).
 - Para fotos borrosas, enviarlas como *archivo* (documento): Telegram comprime las fotos.
+- **Enlace del bot en el ticket (2026-11-18):** el ticket muestra «Abrir en Telegram» y el enlace `t.me/<bot>` solo si el servidor conoce el nombre del bot. Ese nombre sale de `TELEGRAM_BOT_USERNAME` o de `getMe`. El 2026-11-18 Telegram respondió `504` a `getMe` y a `setWebhook` (21:53 UTC), y el ticket salió sin enlace. El registro del webhook ahora reintenta hasta 5 veces con espera creciente. **Pendiente:** definir `TELEGRAM_BOT_USERNAME` en Render (valor no secreto) y verificar que el webhook siga registrado.
 - **Aviso de progreso (2026-11-17; el envío es no fatal: si falla, la factura se procesa igual):** al recibir una foto o PDF válido, el bot responde de inmediato «Recibí tu archivo. Lo estoy leyendo, te aviso en un momento.» antes de descargar y leer. El resultado llega después en otro mensaje. Si la descarga o la lectura fallan, llega el mensaje de error correspondiente.
 - El token del bot va en la URL de cada llamada a la API de Telegram: no se incluye en errores ni logs.
 
@@ -332,6 +333,7 @@ Copia `.env.example` a `.env` y completa los valores.
 |---|---|
 | `PORT` | Puerto (Render lo define solo) |
 | `TELEGRAM_BOT_TOKEN` | Activa el canal de Telegram (lo da @BotFather) |
+| `TELEGRAM_BOT_USERNAME` | Opcional, no secreto: usuario del bot sin @. Si está, el ticket muestra el enlace al bot aunque Telegram esté lento. Si no, el servidor lo consulta a Telegram (`getMe`) |
 | `TELEGRAM_WEBHOOK_SECRET` | Secreto del webhook: solo `A-Z a-z 0-9 _ -` |
 | `ADMIN_PASSWORD` | Contraseña del panel `/admin` (mín. 12 caracteres). Sin ella no hay panel |
 | `PUBLIC_URL` | Dirección pública del servicio. Por defecto `RENDER_EXTERNAL_URL`. Registra el webhook de Telegram y arma los enlaces del panel web |
