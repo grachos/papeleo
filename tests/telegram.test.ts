@@ -132,6 +132,18 @@ describe("loadConfig", () => {
   };
   afterEach(() => vi.unstubAllEnvs());
 
+  it("toma el nombre del bot de TELEGRAM_BOT_USERNAME, sin @, o lo deja vacío", () => {
+    const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
+    expect(withEnv({ ...tg, TELEGRAM_BOT_USERNAME: "@papeleo_bot" }).telegram?.botUsername).toBe("papeleo_bot");
+    expect(withEnv({ ...tg, TELEGRAM_BOT_USERNAME: "" }).telegram?.botUsername).toBeNull();
+    expect(withEnv(tg).telegram?.botUsername).toBeNull();
+  });
+
+  it("rechaza un nombre de bot inválido", () => {
+    const tg = { TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" };
+    expect(() => withEnv({ ...tg, TELEGRAM_BOT_USERNAME: "bot con espacios" })).toThrow("TELEGRAM_BOT_USERNAME");
+  });
+
   it("arranca solo con Telegram", () => {
     const c = withEnv({ TELEGRAM_BOT_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "sec_1" });
     expect(c.whatsapp).toBeNull();

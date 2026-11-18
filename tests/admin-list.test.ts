@@ -11,7 +11,7 @@ describe("listInvitations: nunca manda un filtro IN vacío", () => {
     vi.stubGlobal("fetch", vi.fn(async (u: string) => {
       urls.push(String(u));
       if (String(u).includes("papeleo_invitations")) {
-        return json([{ id: "i1", org_id: "o1", note: "n", status: "activa", expires_at: "2026-11-18T00:00:00Z", ticket_id: null, used_member_id: null, used_at: null, created_at: "2026-11-17T00:00:00Z" }]);
+        return json([{ id: "i1", org_id: "o1", note: "n", status: "activa", expires_at: "2099-01-01T00:00:00Z", ticket_id: null, used_member_id: null, used_at: null, created_at: "2026-11-17T00:00:00Z" }]);
       }
       return json([]);
     }));

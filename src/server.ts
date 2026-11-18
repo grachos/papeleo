@@ -89,6 +89,7 @@ let botUsername: string | null = null;
 // Página pública del enlace de invitación (el token de la ruta es lo único que da acceso).
 // Si el arranque no pudo consultar el nombre del bot, se vuelve a intentar al armar la página (no se queda sin enlace).
 async function currentBotUsername(): Promise<string | null> {
+  if (config.telegram?.botUsername) return config.telegram.botUsername;
   if (!botUsername && telegramClient) {
     botUsername = await telegramClient.getUsername().catch(() => null);
   }
@@ -169,6 +170,18 @@ if (config.telegram && telegramClient) {
   });
 }
 
+const WEBHOOK_INTENTOS = 5;
+
+function registrarWebhook(client: TelegramClient, url: string, secreto: string, intento: number): void {
+  client
+    .setWebhook(url, secreto)
+    .then(() => console.log(`Webhook de Telegram registrado en ${url}`))
+    .catch((err) => {
+      console.error(`No se pudo registrar el webhook de Telegram (intento ${intento} de ${WEBHOOK_INTENTOS})`, err instanceof Error ? err.message : "error");
+      if (intento < WEBHOOK_INTENTOS) setTimeout(() => registrarWebhook(client, url, secreto, intento + 1), intento * 30_000);
+    });
+}
+
 app.listen(config.port, () => {
   const canales = [config.whatsapp && "WhatsApp", config.telegram && "Telegram"].filter(Boolean).join(" + ");
   console.log(`Papeleo escuchando en el puerto ${config.port} (canales: ${canales})`);
@@ -178,11 +191,8 @@ app.listen(config.port, () => {
   }
 
   // Registra el webhook de Telegram al arrancar, si se conoce la URL pública.
+  // Telegram a veces responde 504: se reintenta con espera creciente para no quedarse sin webhook.
   if (config.telegram && telegramClient && publicBase) {
-    const url = `${publicBase}/telegram/webhook`;
-    telegramClient
-      .setWebhook(url, config.telegram.webhookSecret)
-      .then(() => console.log(`Webhook de Telegram registrado en ${url}`))
-      .catch((err) => console.error("No se pudo registrar el webhook de Telegram", err));
+    registrarWebhook(telegramClient, `${publicBase}/telegram/webhook`, config.telegram.webhookSecret, 1);
   }
 });

@@ -11,6 +11,14 @@ const WHATSAPP_VARS = [
   "WHATSAPP_PHONE_NUMBER_ID",
 ];
 
+/** Usuario del bot: 5 a 32 caracteres (letras, números y _), sin @. Vacío o inválido → null (se consulta a Telegram). */
+export function telegramBotUsername(value: string | undefined): string | null {
+  const limpio = (value ?? "").trim().replace(/^@/, "");
+  if (!limpio) return null;
+  if (!/^[A-Za-z0-9_]{5,32}$/.test(limpio)) throw new Error("TELEGRAM_BOT_USERNAME debe tener de 5 a 32 letras, números o _ (sin @)");
+  return limpio;
+}
+
 /** Telegram solo admite A-Z a-z 0-9 _ - (1 a 256 caracteres) en el secreto del webhook. */
 function telegramSecret(value: string): string {
   if (!/^[A-Za-z0-9_-]{1,256}$/.test(value)) {
@@ -55,6 +63,8 @@ export function loadConfig() {
     ? {
         botToken: required("TELEGRAM_BOT_TOKEN"),
         webhookSecret: telegramSecret(required("TELEGRAM_WEBHOOK_SECRET")),
+        // Nombre del bot (sin @), no secreto. Si está, el enlace del ticket no depende de Telegram en cada página.
+        botUsername: telegramBotUsername(process.env.TELEGRAM_BOT_USERNAME),
       }
     : null;
 
