@@ -90,6 +90,22 @@ function plain(text: string): string {
   return text.replace(/\*/g, "");
 }
 
+/** Esperas antes de cada reintento de una llamada transitoria (5xx de Telegram o error de red). */
+const ESPERAS_MS = [1000, 3000];
+const TRANSITORIO = /respondió 5\d\d|descargar el archivo de Telegram: 5\d\d|fetch failed|ECONNRESET|ETIMEDOUT|UND_ERR/;
+
+export async function conReintentos<T>(fn: () => Promise<T>, esperas: number[] = ESPERAS_MS): Promise<T> {
+  for (let intento = 0; ; intento++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : "";
+      if (intento >= esperas.length || !TRANSITORIO.test(mensaje)) throw err;
+      await new Promise((r) => setTimeout(r, esperas[intento]));
+    }
+  }
+}
+
 export class TelegramClient implements MessengerPort {
   private api: string;
   private fileApi: string;
@@ -173,12 +189,15 @@ export class TelegramClient implements MessengerPort {
   }
 
   async downloadMedia(fileId: string) {
-    const file = await this.call("getFile", { file_id: fileId });
-    if (typeof file?.file_path !== "string") throw new Error("Telegram no devolvió la ruta del archivo");
-    const res = await fetch(`${this.fileApi}/${file.file_path}`);
-    if (!res.ok) throw new Error(`No se pudo descargar el archivo de Telegram: ${res.status}`);
-    const ext = file.file_path.split(".").pop()?.toLowerCase() ?? "";
-    const mimeType = EXT_MIME[ext] ?? (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
-    return { data: Buffer.from(await res.arrayBuffer()), mimeType };
+    // Telegram responde 504 de vez en cuando: se reintenta toda la descarga (getFile + archivo) antes de rendirse.
+    return conReintentos(async () => {
+      const file = await this.call("getFile", { file_id: fileId });
+      if (typeof file?.file_path !== "string") throw new Error("Telegram no devolvió la ruta del archivo");
+      const res = await fetch(`${this.fileApi}/${file.file_path}`);
+      if (!res.ok) throw new Error(`No se pudo descargar el archivo de Telegram: ${res.status}`);
+      const ext = file.file_path.split(".").pop()?.toLowerCase() ?? "";
+      const mimeType = EXT_MIME[ext] ?? (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
+      return { data: Buffer.from(await res.arrayBuffer()), mimeType };
+    });
   }
 }

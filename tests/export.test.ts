@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { construirExcel, interpretarPeriodo, neutralizar, parseExportArgs } from "../src/export.js";
 import { todasLasPaginas } from "../src/paginate.js";
-import { TelegramClient } from "../src/telegram.js";
+import { conReintentos, TelegramClient } from "../src/telegram.js";
 import type { Expense } from "../src/types.js";
 
 const expense = (over: Partial<Expense> = {}): Expense => ({
@@ -206,3 +206,38 @@ describe("TelegramClient.sendFile", () => {
     expect((err as Error).message).not.toContain("SECRETO");
   });
 });
+
+describe("reintentos de Telegram", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("una descarga que Telegram responde con 504 se reintenta y termina bien", async () => {
+    const respuestas = [
+      new Response(JSON.stringify({ ok: false, description: "Gateway Timeout" }), { status: 504 }),
+      new Response(JSON.stringify({ ok: true, result: { file_path: "photos/a.jpg" } }), { status: 200 }),
+    ];
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("getFile")) return respuestas.shift()!;
+      return new Response(Buffer.from("imagen"), { status: 200, headers: { "content-type": "image/jpeg" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new TelegramClient("123:SECRETO");
+    const r = await client.downloadMedia("file1");
+    expect(r.mimeType).toBe("image/jpeg");
+    expect(r.data.toString()).toBe("imagen");
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("getFile"))).toHaveLength(2);
+  });
+
+  it("un error que no es transitorio no se reintenta", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: false, description: "file not found" }), { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new TelegramClient("123:SECRETO").downloadMedia("x")).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("conReintentos se rinde tras agotar los intentos", async () => {
+    let n = 0;
+    await expect(conReintentos(async () => { n++; throw new Error("Telegram getFile respondió 504: x"); }, [1, 1])).rejects.toThrow("504");
+    expect(n).toBe(3);
+  });
+});
+
