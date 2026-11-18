@@ -300,7 +300,7 @@ async function handleMedia(msg: IncomingMessage, member: Member, org: Org, deps:
   } catch (err) {
     console.error("Fallo procesando el documento", documentId, err);
     await deps.store.finishDocument(documentId, "error").catch(() => {});
-    await deps.wa.sendText(to, "Tuve un problema procesando ese archivo. Inténtalo de nuevo en unos minutos.");
+    await deps.wa.sendText(to, "Tuve un problema procesando ese archivo. Vuelve a enviarlo en un minuto; si vuelve a pasar, avísame.");
   }
 }
 
