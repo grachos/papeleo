@@ -62,6 +62,8 @@ describe("VisionRescueExtractor", () => {
     expect(r.extraction?.total).toBe(33000); // los valores en pesos se conservan de la primera lectura
     expect(r.usage.tokensIn).toBe(2000);
     expect(r.usage.tokensOut).toBe(250);
+    expect(r.usage.visionTokensIn).toBe(800); // la parte del total que fue la lectura de la imagen
+    expect(r.usage.visionTokensOut).toBe(150);
   });
 
   it("en un tiquete impreso sin fecha solo completa la fecha: no cambia lo que el OCR leyó bien", async () => {

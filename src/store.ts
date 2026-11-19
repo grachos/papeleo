@@ -414,6 +414,21 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
         .update({ extraction_model: usage.model, tokens_in: usage.tokensIn, tokens_out: usage.tokensOut })
         .eq("id", documentId);
       if (u.error) console.error("No se pudo registrar el consumo de la lectura", u.error);
+
+      // Detalle por proveedor (migración 0011), en una actualización aparte: si las columnas aún no existen,
+      // el consumo total de arriba igual queda guardado.
+      if (usage.llamaparsePages !== undefined || usage.visionTokensIn !== undefined) {
+        const d = await this.db
+          .from("papeleo_documents")
+          .update({
+            vision_tokens_in: usage.visionTokensIn ?? 0,
+            vision_tokens_out: usage.visionTokensOut ?? 0,
+            llamaparse_pages: usage.llamaparsePages ?? null,
+            llamaparse_credits: usage.llamaparseCredits ?? null,
+          })
+          .eq("id", documentId);
+        if (d.error) console.error("No se pudo registrar el detalle del consumo", d.error.code ?? "sin_codigo");
+      }
     }
   }
 

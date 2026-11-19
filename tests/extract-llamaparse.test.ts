@@ -12,8 +12,8 @@ const lectura: Extraction = {
   descripcion: "Administración abril", confianza: "alta", items: null,
 };
 
-function parseClient(pages: unknown[] = [{ success: true, page_number: 1, markdown: "# Conjunto\n| Total | 380.000 |" }]) {
-  const parse = vi.fn(async (_p: Record<string, unknown>) => ({ markdown: { pages } }));
+function parseClient(pages: unknown[] = [{ success: true, page_number: 1, markdown: "# Conjunto\n| Total | 380.000 |" }], usage?: { credits: number | null }) {
+  const parse = vi.fn(async (_p: Record<string, unknown>) => ({ markdown: { pages }, usage }));
   return { client: { parsing: { parse } } as unknown as ParseClient, parse };
 }
 
@@ -35,7 +35,7 @@ describe("LlamaParseExtractor: lectura en dos pasos", () => {
     const p = parseClient();
     await new LlamaParseExtractor(opts, p.client, structureClient().client).extract(img, "image/jpeg");
     const params = p.parse.mock.calls[0][0] as any;
-    expect(params).toMatchObject({ tier: "cost_effective", version: "latest", expand: ["markdown"] });
+    expect(params).toMatchObject({ tier: "cost_effective", version: "latest", expand: ["markdown", "usage"] });
     expect(params.upload_file).toBeInstanceOf(File);
     expect(params.upload_file.type).toBe("image/jpeg");
     expect(params.upload_file.size).toBe(img.length);
@@ -55,7 +55,23 @@ describe("LlamaParseExtractor: lectura en dos pasos", () => {
   it("devuelve la lectura validada y los tokens de OpenAI, con el modelo y el nivel usados", async () => {
     const r = await new LlamaParseExtractor(opts, parseClient().client, structureClient().client).extract(img, "image/jpeg");
     expect(r.extraction).toEqual(lectura);
-    expect(r.usage).toEqual({ model: "llamaparse:cost_effective+gpt-5.4-mini", tokensIn: 1200, tokensOut: 300 });
+    expect(r.usage).toEqual({
+      model: "llamaparse:cost_effective+gpt-5.4-mini",
+      tokensIn: 1200,
+      tokensOut: 300,
+      llamaparsePages: 1,
+      llamaparseCredits: null, // la facturación aún no lo registró
+    });
+  });
+
+  it("informa las páginas y los créditos de LlamaParse, que cobra por página y no por tokens", async () => {
+    const dos = [
+      { success: true, page_number: 1, markdown: "# A" },
+      { success: true, page_number: 2, markdown: "# B" },
+    ];
+    const r = await new LlamaParseExtractor(opts, parseClient(dos, { credits: 90 }).client, structureClient().client).extract(img, "application/pdf");
+    expect(r.usage.llamaparsePages).toBe(2);
+    expect(r.usage.llamaparseCredits).toBe(90);
   });
 
   it("ignora las páginas que LlamaParse no pudo leer", async () => {

@@ -272,6 +272,22 @@ where tokens_in is not null
 group by 1 order by 1 desc;
 ```
 
+**Consumo por proveedor (migración `0011`, 2026-11-19).** `tokens_in`/`tokens_out` son el **total de OpenAI** (lectura de texto + visión). El detalle: `vision_tokens_in`/`vision_tokens_out` (la parte del total que fue la lectura de la imagen en comprobantes manuscritos o sin fecha; lectura de texto = total − visión) y, de **LlamaParse** (cobra créditos por página, no tokens), `llamaparse_pages` y `llamaparse_credits` (puede quedar vacío si la facturación aún no lo registró; las páginas siempre se cuentan). Los documentos anteriores quedan en null.
+
+```sql
+select date_trunc('month', created_at) as mes,
+       count(*) as lecturas,
+       sum(tokens_in - coalesce(vision_tokens_in, 0)) as gpt_texto_entrada,
+       sum(tokens_out - coalesce(vision_tokens_out, 0)) as gpt_texto_salida,
+       sum(coalesce(vision_tokens_in, 0)) as gpt_vision_entrada,
+       sum(coalesce(vision_tokens_out, 0)) as gpt_vision_salida,
+       sum(llamaparse_pages) as llamaparse_paginas,
+       sum(llamaparse_credits) as llamaparse_creditos
+from papeleo_documents
+where tokens_in is not null
+group by 1 order by 1 desc;
+```
+
 Estimación previa a medir (100 facturas al mes leídas con Opus): entre $2 y $7, lo más probable ≈ $4; lo más incierto es el razonamiento interno del modelo. Con las preguntas (50 a 60 al mes) el total mensual iría de ≈$2 a ≈$11 según el modelo elegido para preguntar.
 
 **Capa 2 (solo si la capa 1 no alcanza, y solo con aprobación expresa): SQL generado por la IA** sobre *vistas de solo lectura* ya filtradas por empresa. Exigiría: rol de base de datos de solo lectura distinto del servicio, vistas que lean `org_id` de un valor fijado por el servidor (nunca por la IA), validar que sea un único `SELECT`, `statement_timeout` corto, límite de filas, bitácora de cada sentencia y pruebas de aislamiento entre empresas. Es más flexible pero más riesgosa; por eso va aparte y después.

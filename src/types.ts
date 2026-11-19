@@ -216,8 +216,15 @@ export interface AssistantPort {
 /** Tokens que cobró la API por una llamada (entrada incluye los leídos y escritos en caché). */
 export interface Usage {
   model: string;
+  /** Total de tokens de OpenAI en la lectura (texto + visión). */
   tokensIn: number;
   tokensOut: number;
+  /** Parte del total que fue la lectura de la imagen con visión. */
+  visionTokensIn?: number;
+  visionTokensOut?: number;
+  /** LlamaParse cobra en créditos por página: páginas leídas y créditos (null si aún no los registra la facturación). */
+  llamaparsePages?: number;
+  llamaparseCredits?: number | null;
 }
 
 export interface ExtractionResult {
