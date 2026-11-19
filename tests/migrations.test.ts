@@ -64,6 +64,7 @@ beforeAll(async () => {
   await db.exec(sql("0008_invitations_tickets.sql"));
   await db.exec(sql("0009_web_panel.sql"));
   await db.exec(sql("0010_document_status_sin_fecha.sql"));
+  await db.exec(sql("0011_extraction_usage_detail.sql"));
 
   await seedOrg(ORG_A);
   await seedOrg(ORG_B);
@@ -557,5 +558,26 @@ describe("estado sin_fecha de los documentos (0010)", () => {
     await expect(
       db.query("insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type, status) values ($1, $2, 'wa-f2', 'image/jpeg', 'otro')", [ORG_F, MEM_F]),
     ).rejects.toThrow();
+  });
+});
+
+describe("detalle del consumo por proveedor (0011)", () => {
+  it("guarda tokens de visión y páginas y créditos de LlamaParse; los documentos anteriores quedan en null", async () => {
+    const ORG_U = "ffffffff-0000-4000-8000-000000000020";
+    const MEM_U = "ffffffff-0000-4000-8000-000000000021";
+    await db.query("insert into papeleo_organizations (id, name) values ($1, 'Empresa U')", [ORG_U]);
+    await db.query("insert into papeleo_members (id, org_id, phone) values ($1, $2, 'tg:888')", [MEM_U, ORG_U]);
+    const viejo = await db.query<any>(
+      "insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type) values ($1, $2, 'wa-u1', 'image/jpeg') returning vision_tokens_in, llamaparse_pages, llamaparse_credits",
+      [ORG_U, MEM_U],
+    );
+    expect(viejo.rows[0]).toEqual({ vision_tokens_in: null, llamaparse_pages: null, llamaparse_credits: null });
+    const nuevo = await db.query<any>(
+      "insert into papeleo_documents (org_id, member_id, wa_message_id, mime_type, vision_tokens_in, vision_tokens_out, llamaparse_pages, llamaparse_credits) values ($1, $2, 'wa-u2', 'image/jpeg', 2460, 141, 1, 45.5) returning vision_tokens_in, vision_tokens_out, llamaparse_pages, llamaparse_credits",
+      [ORG_U, MEM_U],
+    );
+    expect(Number(nuevo.rows[0].vision_tokens_in)).toBe(2460);
+    expect(Number(nuevo.rows[0].llamaparse_pages)).toBe(1);
+    expect(Number(nuevo.rows[0].llamaparse_credits)).toBe(45.5);
   });
 });

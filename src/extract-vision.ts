@@ -137,6 +137,8 @@ export class VisionRescueExtractor implements ExtractorPort {
         ...result.usage,
         tokensIn: result.usage.tokensIn + leida.tokensIn,
         tokensOut: result.usage.tokensOut + leida.tokensOut,
+        visionTokensIn: (result.usage.visionTokensIn ?? 0) + leida.tokensIn,
+        visionTokensOut: (result.usage.visionTokensOut ?? 0) + leida.tokensOut,
       };
       if (!leida.extraction || !leida.extraction.es_comprobante) return { extraction: e, usage };
       return { extraction: combinar(e, leida.extraction, hoy), usage };

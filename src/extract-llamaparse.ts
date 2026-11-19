@@ -42,7 +42,7 @@ export class LlamaParseExtractor implements ExtractorPort {
       tier: this.opts.tier,
       version: "latest",
       upload_file: file,
-      expand: ["markdown"],
+      expand: ["markdown", "usage"],
     });
 
     const text = ((parsed?.markdown?.pages ?? []) as { success?: boolean; markdown?: string }[])
@@ -52,7 +52,15 @@ export class LlamaParseExtractor implements ExtractorPort {
       .trim()
       .slice(0, MAX_TEXT_CHARS);
 
-    const usage: Usage = { model: `llamaparse:${this.opts.tier}+${this.opts.model}`, tokensIn: 0, tokensOut: 0 };
+    const paginas = (parsed?.markdown?.pages ?? []) as unknown[];
+    const creditos = parsed?.usage?.credits;
+    const usage: Usage = {
+      model: `llamaparse:${this.opts.tier}+${this.opts.model}`,
+      tokensIn: 0,
+      tokensOut: 0,
+      llamaparsePages: paginas.length,
+      llamaparseCredits: typeof creditos === "number" ? creditos : null,
+    };
     if (!text) return { extraction: null, usage };
 
     const res = await this.structurer.responses.parse({
