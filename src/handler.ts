@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
 import type { Extraction } from "./extract.js";
-import { sinEcoDeFecha } from "./extract-date-rescue.js";
+import { sinEcoDeFecha } from "./extract-vision.js";
 import { fechaLeida, leerRespuestaFecha, normalizarNit } from "./invoice-key.js";
 import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
-import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
+import { expenseMessage, HELP, itemsLines, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
 import type { Deps, IncomingMessage, Member, Org, PanelFilters, Usage } from "./types.js";
 
@@ -335,9 +335,11 @@ async function procesarLectura(
   if (!fecha) {
     await deps.store.finishDocument(documentId, "sin_fecha", extraction, usage);
     const total = extraction.total !== null ? ` por ${money(extraction.total)}` : "";
+    const detalle = itemsLines(extraction.items, extraction.moneda || "COP");
+    const leido = detalle.length > 0 ? `\n\nLeí este detalle:\n${detalle.join("\n")}` : "";
     return deps.wa.sendText(
       to,
-      `Pude leer la factura de ${extraction.proveedor ?? "un proveedor"}${total}, pero no encontré la fecha. ¿Cuál fue? Escríbemela como AAAA-MM-DD (por ejemplo 2026-11-10), o escribe «hoy» si es de hoy.`,
+      `Pude leer la factura de ${extraction.proveedor ?? "un proveedor"}${total}, pero no encontré la fecha.${leido}\n\n¿Cuál fue la fecha? Escríbemela como AAAA-MM-DD (por ejemplo 2026-11-10), o escribe «hoy» si es de hoy.`,
     );
   }
 
@@ -367,7 +369,7 @@ async function procesarLectura(
     }
   }
 
-  await deps.wa.sendButtons(to, expenseMessage(expense) + note, [
+  await deps.wa.sendButtons(to, expenseMessage(expense, extraction.items) + note, [
     { id: DISCARD_PREFIX + expense.id, title: "Descartar" },
   ]);
 }

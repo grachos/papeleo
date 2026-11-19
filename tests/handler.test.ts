@@ -120,6 +120,31 @@ describe("handleMessage", () => {
     expect((mocks.wa.sendText.mock.calls.at(-1) as unknown as string[])[1]).toContain("no encontré la fecha");
   });
 
+  it("la pregunta de la fecha muestra el detalle que sí se leyó", async () => {
+    const items = [{ cantidad: 6, descripcion: "Rollo de Impresora Térmica 80x60", valor_unitario: 5500, valor_linea: 33000 }];
+    const { deps, mocks } = makeDeps({ extraction: { ...extraction, fecha: null, total: 33000, subtotal: 33000, items } });
+    await handleMessage(photo, deps);
+    const mensaje = (mocks.wa.sendText.mock.calls.at(-1) as unknown as string[])[1];
+    expect(mensaje).toContain("Leí este detalle");
+    expect(mensaje).toContain("6 × Rollo de Impresora Térmica 80x60");
+    expect(mensaje).toMatch(/\$\s5\.500 c\/u/);
+    expect(mensaje).toMatch(/= \$\s33\.000/);
+  });
+
+  it("la confirmación muestra el detalle de la factura y avisa si los renglones no cuadran con el total", async () => {
+    const items = [
+      { cantidad: 2, descripcion: "Arroz", valor_unitario: 5000, valor_linea: 10000 },
+      { cantidad: null, descripcion: "Pan", valor_unitario: null, valor_linea: 3000 },
+    ];
+    const { deps, mocks } = makeDeps({ extraction: { ...extraction, total: 45900, subtotal: 38571, items } });
+    await handleMessage(photo, deps);
+    const mensaje = (mocks.wa.sendButtons.mock.calls.at(-1) as unknown as string[])[1];
+    expect(mensaje).toContain("🧾 Detalle:");
+    expect(mensaje).toContain("• 2 × Arroz");
+    expect(mensaje).toMatch(/• Pan = \$\s3\.000/);
+    expect(mensaje).toContain("no cuadran con el total");
+  });
+
   it("no duplica una factura con el mismo número y el mismo NIT (el NIT se compara sin dígito de verificación)", async () => {
     const { deps, saved, mocks } = makeDeps({ extraction: { ...extraction, nit: "900.155.107-1", numero_factura: "202443" } });
     mocks.store.expensesWithNumber.mockResolvedValueOnce([{ ...saved0, nit: "900155107", numero_factura: "202443", fecha: "2026-11-03" } as Expense]);

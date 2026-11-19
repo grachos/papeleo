@@ -12,7 +12,7 @@ import { ClaudeExtractor } from "./extract.js";
 import { handleMessage } from "./handler.js";
 import { GoogleSheets } from "./sheets.js";
 import { SupabaseStore } from "./store.js";
-import { DateRescueExtractor, OpenAIDateReader } from "./extract-date-rescue.js";
+import { VisionRescueExtractor, OpenAIVisionReader } from "./extract-vision.js";
 import { todayBogota } from "./format.js";
 import { callbackQueryId, parseTelegramUpdate, TelegramClient, verifySecret } from "./telegram.js";
 import type { Deps, MessengerPort } from "./types.js";
@@ -47,7 +47,7 @@ function extractorPort() {
       claude,
     );
     // Si la lectura no trae fecha (p. ej. escrita a mano), se intenta leer de la imagen con visión antes de preguntar.
-    return new DateRescueExtractor(lectura, OpenAIDateReader.withKey(config.openaiExtractionModel, config.openaiApiKey), todayBogota);
+    return new VisionRescueExtractor(lectura, OpenAIVisionReader.withKey(config.openaiExtractionModel, config.openaiApiKey), todayBogota);
   }
   if (config.extractionProvider === "llamaparse") {
     console.warn("EXTRACTION_PROVIDER=llamaparse pero faltan LLAMA_CLOUD_API_KEY u OPENAI_API_KEY: se lee con Claude.");
