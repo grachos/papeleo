@@ -25,6 +25,7 @@ import type {
   Member,
   NewExpense,
   Org,
+  ExportFilters,
   PanelFilters,
   PanelPort,
   PanelSession,
@@ -503,7 +504,22 @@ export class SupabaseStore implements StorePort, AdminPort, QueryPort, InvitePor
   }
 
   /** Facturas para el Excel: reutiliza la misma consulta del panel, por páginas de 50 (tope de la función SQL). */
-  async exportExpenses(orgId: string, filters: PanelFilters, max: number): Promise<Expense[] | null> {
+  async exportExpenses(orgId: string, filters: ExportFilters, max: number): Promise<Expense[] | null> {
+    // Por día de registro («lo que guardé hoy»): la función SQL del panel solo filtra por la fecha de la factura.
+    if (filters.registradoDesde || filters.registradoHasta) {
+      const res = await this.db
+        .from("papeleo_expenses")
+        .select(EXPENSE_COLUMNS)
+        .eq("org_id", orgId)
+        .eq("estado", "registrado")
+        .gte("created_at", filters.registradoDesde ?? "-infinity")
+        .lt("created_at", filters.registradoHasta ?? "infinity")
+        .order("fecha", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(max + 1);
+      if (res.error) throw res.error;
+      return res.data.length > max ? null : res.data.map(toExpense);
+    }
     const pageSize = 50;
     const rows: Expense[] = [];
     for (let page = 1; ; page++) {

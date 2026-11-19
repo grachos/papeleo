@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { CATEGORIAS } from "./extract.js";
 import { monthRange } from "./format.js";
 import { checkItems, type ExpenseItem } from "./items.js";
-import type { Expense, PanelFilters } from "./types.js";
+import type { ExportFilters, Expense, PanelFilters } from "./types.js";
 
 /** Tope de facturas por archivo: más que esto hay que acotar las fechas (un Excel enorme no sirve en un chat). */
 export const EXPORT_MAX_ROWS = 1000;
@@ -206,11 +206,11 @@ function formatearHoja(ws: ExcelJS.Worksheet, dinero: string[]) {
   for (const key of dinero) ws.getColumn(key).numFmt = "#,##0";
 }
 
-// --- Periodos en lenguaje natural («antes de noviembre», «de enero a marzo») -------------------
+// --- Periodos en lenguaje natural («antes de noviembre», «hoy», «lo guardado esta semana») ---------------
 
 export type PeriodoNatural =
   | { tipo: "todo" }
-  | { tipo: "filtros"; filters: PanelFilters; descripcion: string }
+  | { tipo: "filtros"; filters: ExportFilters; descripcion: string }
   | { tipo: "no_entiendo" };
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -221,17 +221,54 @@ const diasDelMes = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCD
 const fechaISO = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const numeroMes = (nombre: string) => (nombre === "setiembre" ? 9 : MESES.indexOf(nombre) + 1);
 
+/** Suma días a una fecha AAAA-MM-DD (puede ser negativo). */
+function sumarDias(iso: string, dias: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const f = new Date(Date.UTC(y, m - 1, d + dias));
+  return fechaISO(f.getUTCFullYear(), f.getUTCMonth() + 1, f.getUTCDate());
+}
+
+/** Colombia está en UTC-5 todo el año: el día 00:00 de Bogotá. */
+const inicioDelDiaBogota = (iso: string) => `${iso}T00:00:00-05:00`;
+
 /**
- * Interpreta el periodo de una frase libre. Lo que no entiende (semanas, «ayer», rubros, proveedores,
- * fechas sueltas) NO se exporta completo: se pide usar el comando con filtros.
- * Un mes sin año usa el año actual, o el anterior si ese mes aún no ha llegado.
+ * «Lo guardado hoy», «lo que subí ayer»: el periodo es el día en que se REGISTRÓ, no la fecha impresa en la factura.
+ * «Las facturas registradas antes de noviembre» NO cuenta: ahí «registradas» solo describe las facturas.
+ */
+const POR_REGISTRO = /\b(lo (guardado|subido|cargado|registrado|ingresado|agregado)|guarde|registre|subi|cargue|agregue)\b/;
+
+/** «Mándamelo», «eso», «lo mismo»: se refiere a lo que se acaba de hablar. */
+export function esReferenciaAnterior(texto: string): boolean {
+  return /\b(mandamelo|enviamelo|pasamelo|damelo|eso|esos|esas|lo mismo|lo anterior|el mismo)\b/.test(quitarTildes(texto));
+}
+
+/**
+ * Interpreta el periodo de una frase libre. Lo que no entiende (rubros, proveedores, fechas sueltas, «hace 3 meses»)
+ * NO se exporta completo: se pide usar el comando con filtros.
+ * Un mes sin año usa el año actual, o el anterior si ese mes aún no ha llegado. La semana empieza el lunes.
+ * Si dice «guardado/registrado/subido», el periodo es el día de registro; si no, la fecha de la factura.
  */
 export function interpretarPeriodo(texto: string, hoy: string): PeriodoNatural {
   const n = quitarTildes(texto);
+  const r = interpretarRango(n, hoy);
+  if (r.tipo !== "filtros" || !POR_REGISTRO.test(n)) return r;
+
+  const { desde, hasta } = r.filters;
+  return {
+    tipo: "filtros",
+    filters: {
+      ...(desde ? { registradoDesde: inicioDelDiaBogota(desde) } : {}),
+      ...(hasta ? { registradoHasta: inicioDelDiaBogota(sumarDias(hasta, 1)) } : {}),
+    },
+    descripcion: `registradas ${r.descripcion.replace(/^de /, "")}`,
+  };
+}
+
+function interpretarRango(n: string, hoy: string): PeriodoNatural {
   const [hy, hm] = hoy.split("-").map(Number);
 
   if (/\d{4}-\d{2}-\d{2}/.test(n)) return { tipo: "no_entiendo" };
-  if (/\b(semana|ayer|hoy|trimestre|quincena|hace|dias?|anos?|anio|rubro|categoria|proveedor)\b/.test(n)) return { tipo: "no_entiendo" };
+  if (/\b(rubro|categoria|proveedor)\b/.test(n)) return { tipo: "no_entiendo" };
 
   const anioExplicito = n.match(/\b(20\d{2})\b/);
   const anio = anioExplicito ? Number(anioExplicito[1]) : undefined;
@@ -242,6 +279,32 @@ export function interpretarPeriodo(texto: string, hoy: string): PeriodoNatural {
     descripcion,
   });
   const mesCompleto = (y: number, m: number) => rango(fechaISO(y, m, 1), fechaISO(y, m, diasDelMes(y, m)), `de ${fechaISO(y, m, 1).slice(0, 7)}`);
+
+  // Periodos relativos a hoy.
+  if (/\bhoy\b/.test(n)) return rango(hoy, hoy, `de hoy (${hoy})`);
+  if (/\bayer\b/.test(n)) {
+    const ayer = sumarDias(hoy, -1);
+    return rango(ayer, ayer, `de ayer (${ayer})`);
+  }
+  const lunes = (() => {
+    const [y, m, d] = hoy.split("-").map(Number);
+    const dia = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = domingo
+    return sumarDias(hoy, -((dia + 6) % 7));
+  })();
+  if (/\besta semana\b/.test(n)) return rango(lunes, sumarDias(lunes, 6), `de esta semana (${lunes} a ${sumarDias(lunes, 6)})`);
+  if (/\bsemana (pasada|anterior)\b/.test(n)) {
+    const ini = sumarDias(lunes, -7);
+    return rango(ini, sumarDias(ini, 6), `de la semana pasada (${ini} a ${sumarDias(ini, 6)})`);
+  }
+  if (/\beste ano\b/.test(n)) return rango(fechaISO(hy, 1, 1), fechaISO(hy, 12, 31), `de este año (${hy})`);
+  if (/\bano pasado\b/.test(n)) return rango(fechaISO(hy - 1, 1, 1), fechaISO(hy - 1, 12, 31), `del año pasado (${hy - 1})`);
+  const ultimos = n.match(/\bultim[oa]s? (\d{1,3}) (dias?|semanas?)\b/);
+  if (ultimos) {
+    const dias = Math.min(366, Number(ultimos[1]) * (ultimos[2].startsWith("semana") ? 7 : 1));
+    if (dias >= 1) return rango(sumarDias(hoy, -(dias - 1)), hoy, `de los últimos ${dias} días`);
+  }
+
+  if (/\b(trimestre|quincena|hace|dias?|semanas?|anos?|anio)\b/.test(n)) return { tipo: "no_entiendo" };
 
   if (/\beste mes\b/.test(n)) return mesCompleto(hy, hm);
   if (/\bmes pasado\b/.test(n)) return hm === 1 ? mesCompleto(hy - 1, 12) : mesCompleto(hy, hm - 1);
