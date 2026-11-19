@@ -12,6 +12,8 @@ import { ClaudeExtractor } from "./extract.js";
 import { handleMessage } from "./handler.js";
 import { GoogleSheets } from "./sheets.js";
 import { SupabaseStore } from "./store.js";
+import { DateRescueExtractor, OpenAIDateReader } from "./extract-date-rescue.js";
+import { todayBogota } from "./format.js";
 import { callbackQueryId, parseTelegramUpdate, TelegramClient, verifySecret } from "./telegram.js";
 import type { Deps, MessengerPort } from "./types.js";
 import { parseWebhook, verifySignature, WhatsAppClient } from "./whatsapp.js";
@@ -36,7 +38,7 @@ const publicBase = config.publicUrl?.replace(/\/$/, "") ?? null;
 function extractorPort() {
   const claude = config.anthropicApiKey ? new ClaudeExtractor(config.extractionModel) : null;
   if (config.extractionProvider === "llamaparse" && config.llamaCloudApiKey && config.openaiApiKey) {
-    return new FallbackExtractor(
+    const lectura = new FallbackExtractor(
       new LlamaParseExtractor(
         { tier: config.llamaParseTier, model: config.openaiExtractionModel },
         new LlamaCloud({ apiKey: config.llamaCloudApiKey }) as unknown as import("./extract-llamaparse.js").ParseClient,
@@ -44,6 +46,8 @@ function extractorPort() {
       ),
       claude,
     );
+    // Si la lectura no trae fecha (p. ej. escrita a mano), se intenta leer de la imagen con visión antes de preguntar.
+    return new DateRescueExtractor(lectura, OpenAIDateReader.withKey(config.openaiExtractionModel, config.openaiApiKey), todayBogota);
   }
   if (config.extractionProvider === "llamaparse") {
     console.warn("EXTRACTION_PROVIDER=llamaparse pero faltan LLAMA_CLOUD_API_KEY u OPENAI_API_KEY: se lee con Claude.");

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
 import type { Extraction } from "./extract.js";
+import { sinEcoDeFecha } from "./extract-date-rescue.js";
 import { fechaLeida, leerRespuestaFecha, normalizarNit } from "./invoice-key.js";
 import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
@@ -380,7 +381,9 @@ async function completarFecha(
   deps: Deps,
 ): Promise<void> {
   try {
-    return await procesarLectura(org, member, pendiente.documentId, pendiente.extraction, undefined, fecha, deps);
+    // Si el «número de factura» eran los dígitos de la fecha escrita a mano, se descarta.
+    const lectura = { ...pendiente.extraction, numero_factura: sinEcoDeFecha(pendiente.extraction.numero_factura, fecha) };
+    return await procesarLectura(org, member, pendiente.documentId, lectura, undefined, fecha, deps);
   } catch (err) {
     console.error("Fallo completando la fecha de una factura", (err as { status?: number }).status ?? "sin_estado");
     return deps.wa.sendText(member.phone, "Tuve un problema guardando la factura. Inténtalo de nuevo en unos minutos.");

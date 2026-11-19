@@ -146,6 +146,14 @@ describe("handleMessage", () => {
     expect(mocks.store.finishDocument).toHaveBeenCalledWith("d9", "procesado", expect.anything(), undefined);
   });
 
+  it("al completar la fecha, descarta un «número de factura» que eran los dígitos de esa fecha", async () => {
+    const { deps, mocks, saved } = makeDeps();
+    mocks.store.pendingDate.mockResolvedValueOnce({ documentId: "d9", extraction: { ...extraction, fecha: null, numero_factura: "181136" } });
+    await handleMessage(text("18/11/2026"), deps);
+    expect(saved[0].fecha).toBe("2026-11-18");
+    expect(saved[0].numero_factura).toBeNull();
+  });
+
   it("«hoy» como respuesta completa la factura con la fecha de hoy", async () => {
     const { deps, mocks, saved } = makeDeps();
     mocks.store.pendingDate.mockResolvedValueOnce({ documentId: "d9", extraction: { ...extraction, fecha: null } });
