@@ -1,3 +1,4 @@
+import { checkItems, type ExpenseItem } from "./items.js";
 import type { Expense } from "./types.js";
 
 const cop = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
@@ -25,7 +26,22 @@ export function monthRange(day: string): { from: string; to: string } {
 
 const label = (categoria: string) => categoria.replaceAll("_", " ");
 
-export function expenseMessage(e: Expense): string {
+const MAX_RENGLONES_EN_MENSAJE = 8;
+
+/** Líneas del detalle de una factura («6 × Rollo… $5.500 = $33.000»); vacío si no hay renglones. */
+export function itemsLines(items: ExpenseItem[] | null | undefined, moneda = "COP"): string[] {
+  if (!items || items.length === 0) return [];
+  const fmt = (n: number) => moneyIn(n, moneda);
+  const lines = items.slice(0, MAX_RENGLONES_EN_MENSAJE).map((i) => {
+    const cantidad = i.cantidad !== null ? `${i.cantidad} × ` : "";
+    const unitario = i.cantidad !== null && i.valor_unitario !== null ? ` (${fmt(i.valor_unitario)} c/u)` : "";
+    return `• ${cantidad}${i.descripcion}${unitario} = ${fmt(i.valor_linea)}`;
+  });
+  if (items.length > MAX_RENGLONES_EN_MENSAJE) lines.push(`… y ${items.length - MAX_RENGLONES_EN_MENSAJE} más`);
+  return lines;
+}
+
+export function expenseMessage(e: Expense, items?: ExpenseItem[] | null): string {
   const lines = [
     "✅ *Gasto registrado*",
     `🏪 ${e.proveedor ?? "Proveedor no identificado"}${e.nit ? ` (NIT ${e.nit})` : ""}`,
@@ -34,6 +50,10 @@ export function expenseMessage(e: Expense): string {
     `🏷️ ${label(e.categoria)}`,
   ];
   if (e.descripcion) lines.push(`📝 ${e.descripcion}`);
+  const detalle = itemsLines(items, e.moneda);
+  if (detalle.length > 0) lines.push("", "🧾 Detalle:", ...detalle);
+  const cuadre = checkItems(items, e.total, e.subtotal);
+  if (cuadre.revisar) lines.push("", `⚠️ Los renglones suman ${moneyIn(cuadre.suma, e.moneda)} y no cuadran con el total. Revisa el detalle.`);
   if (e.confianza === "baja") lines.push("", "⚠️ La imagen no se lee bien. Revisa que el valor y la fecha sean correctos.");
   return lines.join("\n");
 }

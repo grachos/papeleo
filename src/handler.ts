@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { extractCode } from "./access.js";
 import type { Extraction } from "./extract.js";
+import { sinEcoDeFecha } from "./extract-vision.js";
 import { fechaLeida, leerRespuestaFecha, normalizarNit } from "./invoice-key.js";
 import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
-import { expenseMessage, HELP, money, monthRange, summaryMessage, todayBogota } from "./format.js";
+import { expenseMessage, HELP, itemsLines, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
 import type { Deps, IncomingMessage, Member, Org, PanelFilters, Usage } from "./types.js";
 
@@ -334,9 +335,11 @@ async function procesarLectura(
   if (!fecha) {
     await deps.store.finishDocument(documentId, "sin_fecha", extraction, usage);
     const total = extraction.total !== null ? ` por ${money(extraction.total)}` : "";
+    const detalle = itemsLines(extraction.items, extraction.moneda || "COP");
+    const leido = detalle.length > 0 ? `\n\nLeí este detalle:\n${detalle.join("\n")}` : "";
     return deps.wa.sendText(
       to,
-      `Pude leer la factura de ${extraction.proveedor ?? "un proveedor"}${total}, pero no encontré la fecha. ¿Cuál fue? Escríbemela como AAAA-MM-DD (por ejemplo 2026-11-10), o escribe «hoy» si es de hoy.`,
+      `Pude leer la factura de ${extraction.proveedor ?? "un proveedor"}${total}, pero no encontré la fecha.${leido}\n\n¿Cuál fue la fecha? Escríbemela como AAAA-MM-DD (por ejemplo 2026-11-10), o escribe «hoy» si es de hoy.`,
     );
   }
 
@@ -366,7 +369,7 @@ async function procesarLectura(
     }
   }
 
-  await deps.wa.sendButtons(to, expenseMessage(expense) + note, [
+  await deps.wa.sendButtons(to, expenseMessage(expense, extraction.items) + note, [
     { id: DISCARD_PREFIX + expense.id, title: "Descartar" },
   ]);
 }
@@ -380,7 +383,9 @@ async function completarFecha(
   deps: Deps,
 ): Promise<void> {
   try {
-    return await procesarLectura(org, member, pendiente.documentId, pendiente.extraction, undefined, fecha, deps);
+    // Si el «número de factura» eran los dígitos de la fecha escrita a mano, se descarta.
+    const lectura = { ...pendiente.extraction, numero_factura: sinEcoDeFecha(pendiente.extraction.numero_factura, fecha) };
+    return await procesarLectura(org, member, pendiente.documentId, lectura, undefined, fecha, deps);
   } catch (err) {
     console.error("Fallo completando la fecha de una factura", (err as { status?: number }).status ?? "sin_estado");
     return deps.wa.sendText(member.phone, "Tuve un problema guardando la factura. Inténtalo de nuevo en unos minutos.");
