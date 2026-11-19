@@ -3,11 +3,11 @@ import { extractCode } from "./access.js";
 import type { Extraction } from "./extract.js";
 import { sinEcoDeFecha } from "./extract-vision.js";
 import { fechaLeida, leerRespuestaFecha, normalizarNit } from "./invoice-key.js";
-import { construirExcel, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
+import { construirExcel, esReferenciaAnterior, EXPORT_MAX_ROWS, interpretarPeriodo, parseExportArgs, XLSX_MIME } from "./export.js";
 import { isSupportedMime } from "./extract.js";
 import { expenseMessage, HELP, itemsLines, money, monthRange, summaryMessage, todayBogota } from "./format.js";
 import { parseSheetId } from "./sheets.js";
-import type { Deps, IncomingMessage, Member, Org, PanelFilters, Usage } from "./types.js";
+import type { Deps, ExportFilters, IncomingMessage, Member, Org, Usage } from "./types.js";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const DISCARD_PREFIX = "descartar:";
@@ -133,11 +133,20 @@ async function exportExcel(text: string, member: Member, org: Org, deps: Deps): 
 /** Frases libres que mencionan Excel: el periodo se interpreta; si no se entiende, no se exporta todo. */
 async function exportExcelNatural(text: string, member: Member, org: Org, deps: Deps): Promise<void> {
   const today = (deps.today ?? todayBogota)();
-  const periodo = interpretarPeriodo(text, today);
+  let periodo = interpretarPeriodo(text, today);
+
+  // «Mándamelo en Excel» sin periodo, justo después de hablar de uno («hoy», «noviembre»): se usa el de la pregunta anterior.
+  if (periodo.tipo === "todo" && esReferenciaAnterior(text) && deps.query) {
+    const desde = new Date(Date.now() - MEMORY_MINUTES * 60_000).toISOString();
+    const turnos = await deps.query.recentTurns(member.id, desde, 1).catch(() => []);
+    const anterior = turnos.at(-1);
+    if (anterior) periodo = interpretarPeriodo(anterior.question, today);
+  }
+
   if (periodo.tipo === "no_entiendo") {
     return deps.wa.sendText(
       member.phone,
-      "No entendí el periodo. Puedes pedirlo así:\n• excel mes 2026-10\n• excel desde 2026-01-01 hasta 2026-03-31\n• excel rubro transporte (o proveedor)\nO dime «excel» para todas tus facturas.",
+      "No entendí el periodo. Puedes pedirlo así:\n• excel de hoy, de ayer, de esta semana o del mes pasado\n• excel lo guardado hoy\n• excel mes 2026-10\n• excel desde 2026-01-01 hasta 2026-03-31\n• excel rubro transporte (o proveedor)\nO dime «excel» para todas tus facturas.",
     );
   }
   if (periodo.tipo === "todo") return enviarExcel(member, org, deps, {}, "de todo el registro");
@@ -145,7 +154,7 @@ async function exportExcelNatural(text: string, member: Member, org: Org, deps: 
 }
 
 /** Consulta, arma el .xlsx y lo envía solo al chat que lo pidió. Solo lee. */
-async function enviarExcel(member: Member, org: Org, deps: Deps, filters: PanelFilters, descripcion: string): Promise<void> {
+async function enviarExcel(member: Member, org: Org, deps: Deps, filters: ExportFilters, descripcion: string): Promise<void> {
   const to = member.phone;
   const port = deps.wa;
   if (!port.sendFile) return port.sendText(to, "Por ahora el Excel solo se entrega por Telegram.");

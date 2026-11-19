@@ -97,7 +97,7 @@ export interface StorePort {
   /** Factura leída sin fecha, pendiente de que la persona la diga; null si no hay. */
   pendingDate(orgId: string, memberId: string): Promise<{ documentId: string; extraction: Extraction } | null>;
   /** Facturas registradas de la empresa que cumplen los filtros; null si superan el tope (hay que acotar las fechas). */
-  exportExpenses(orgId: string, filters: PanelFilters, max: number): Promise<Expense[] | null>;
+  exportExpenses(orgId: string, filters: ExportFilters, max: number): Promise<Expense[] | null>;
   /** Renglones de varios gastos de la empresa, agrupados por id de gasto. */
   itemsForExpenses(orgId: string, expenseIds: string[]): Promise<Map<string, ExpenseItem[]>>;
   setSheet(orgId: string, sheetId: string): Promise<void>;
@@ -244,6 +244,12 @@ export interface PanelSession {
   orgId: string;
   orgName: string;
   memberName: string | null;
+}
+
+/** Filtros del Excel: los del panel más el día de registro (timestamps con zona horaria; hasta es exclusivo). */
+export interface ExportFilters extends PanelFilters {
+  registradoDesde?: string;
+  registradoHasta?: string;
 }
 
 export interface PanelFilters {

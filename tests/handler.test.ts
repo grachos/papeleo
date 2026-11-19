@@ -301,12 +301,56 @@ describe("excel", () => {
     expect(exportExpenses).toHaveBeenCalledWith("o1", { hasta: "2026-10-31" }, 1000);
   });
 
+  it("«todo lo guardado hoy» filtra por el día de registro (hoy en Bogotá), no por la fecha de la factura", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Muéstrame en Excel todo lo guardado hoy"), deps);
+    expect(exportExpenses).toHaveBeenCalledWith(
+      "o1",
+      { registradoDesde: "2026-11-09T00:00:00-05:00", registradoHasta: "2026-11-10T00:00:00-05:00" },
+      1000,
+    );
+  });
+
+  it("«hoy» y «ayer» se entienden", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Excel de ayer"), deps);
+    expect(exportExpenses).toHaveBeenLastCalledWith("o1", { desde: "2026-11-08", hasta: "2026-11-08" }, 1000);
+  });
+
+  it("«Mándamelo en Excel» usa el periodo de la pregunta anterior en vez de exportar todo", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    const recentTurns = vi.fn(async () => [{ question: "Dice hoy", answer: "Hoy llevas gastados $ 33.000 en una factura." }]);
+    Object.assign(mocks, { query: { recentTurns } });
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Mándamelo en Excel"), deps);
+    expect(recentTurns).toHaveBeenCalledOnce();
+    expect(exportExpenses).toHaveBeenCalledWith("o1", { desde: "2026-11-09", hasta: "2026-11-09" }, 1000);
+  });
+
+  it("«Mándamelo en Excel» sin nada de qué hablar exporta todo", async () => {
+    const { deps, mocks } = makeDeps();
+    const exportExpenses = vi.fn(async () => [fila]);
+    Object.assign(mocks, { query: { recentTurns: vi.fn(async () => []) } });
+    Object.assign(mocks.store, { exportExpenses, itemsForExpenses: vi.fn(async () => new Map()) });
+    Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
+    await handleMessage(text("Mándamelo en Excel"), deps);
+    expect(exportExpenses).toHaveBeenCalledWith("o1", {}, 1000);
+  });
+
   it("un periodo que no entiende pide reformular y no exporta", async () => {
     const { deps, mocks } = makeDeps();
     const exportExpenses = vi.fn(async () => []);
     Object.assign(mocks.store, { exportExpenses });
     Object.assign(mocks.wa, { sendFile: vi.fn(async () => {}) });
-    await handleMessage(text("Excel de la semana pasada"), deps);
+    await handleMessage(text("Excel de hace tres meses"), deps);
     expect(exportExpenses).not.toHaveBeenCalled();
     expect((mocks.wa.sendText.mock.calls[0] as unknown as string[])[1]).toContain("No entendí el periodo");
   });

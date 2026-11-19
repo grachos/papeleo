@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { construirExcel, interpretarPeriodo, neutralizar, parseExportArgs } from "../src/export.js";
+import { construirExcel, esReferenciaAnterior, interpretarPeriodo, neutralizar, parseExportArgs } from "../src/export.js";
 import { todasLasPaginas } from "../src/paginate.js";
 import { conReintentos, TelegramClient } from "../src/telegram.js";
 import type { Expense } from "../src/types.js";
@@ -98,9 +98,45 @@ describe("interpretarPeriodo (frases libres)", () => {
     expect(interpretarPeriodo("Quiero descargar el reporte de gastos en Excel", HOY)).toEqual({ tipo: "todo" });
   });
 
+  it("hoy, ayer, esta semana y la semana pasada (la semana empieza el lunes)", () => {
+    // HOY = martes 2026-11-17
+    expect(interpretarPeriodo("Muéstrame en Excel todo lo de hoy", HOY)).toMatchObject({ filters: { desde: "2026-11-17", hasta: "2026-11-17" } });
+    expect(interpretarPeriodo("Excel de ayer", HOY)).toMatchObject({ filters: { desde: "2026-11-16", hasta: "2026-11-16" } });
+    expect(interpretarPeriodo("excel de esta semana", HOY)).toMatchObject({ filters: { desde: "2026-11-16", hasta: "2026-11-22" } });
+    expect(interpretarPeriodo("el Excel de la semana pasada", HOY)).toMatchObject({ filters: { desde: "2026-11-09", hasta: "2026-11-15" } });
+  });
+
+  it("este año, el año pasado y los últimos N días o semanas", () => {
+    expect(interpretarPeriodo("excel de este año", HOY)).toMatchObject({ filters: { desde: "2026-01-01", hasta: "2026-12-31" } });
+    expect(interpretarPeriodo("excel del año pasado", HOY)).toMatchObject({ filters: { desde: "2025-01-01", hasta: "2025-12-31" } });
+    expect(interpretarPeriodo("excel de los últimos 7 días", HOY)).toMatchObject({ filters: { desde: "2026-11-11", hasta: "2026-11-17" } });
+    expect(interpretarPeriodo("excel de las últimas 2 semanas", HOY)).toMatchObject({ filters: { desde: "2026-11-04", hasta: "2026-11-17" } });
+  });
+
+  it("«guardado/registrado/subido» filtra por el día de registro, no por la fecha de la factura", () => {
+    const r = interpretarPeriodo("Muéstrame en Excel todo lo guardado hoy", HOY);
+    expect(r).toMatchObject({
+      tipo: "filtros",
+      filters: { registradoDesde: "2026-11-17T00:00:00-05:00", registradoHasta: "2026-11-18T00:00:00-05:00" },
+    });
+    expect((r as { filters: object }).filters).not.toHaveProperty("desde");
+    expect(interpretarPeriodo("las facturas que subí ayer en excel", HOY)).toMatchObject({
+      filters: { registradoDesde: "2026-11-16T00:00:00-05:00", registradoHasta: "2026-11-17T00:00:00-05:00" },
+    });
+    expect(interpretarPeriodo("excel de lo registrado en octubre", HOY)).toMatchObject({
+      filters: { registradoDesde: "2026-10-01T00:00:00-05:00", registradoHasta: "2026-11-01T00:00:00-05:00" },
+    });
+  });
+
+  it("«mándamelo» y «eso» se reconocen como referencia a lo anterior; una petición normal, no", () => {
+    expect(esReferenciaAnterior("Mándamelo en Excel")).toBe(true);
+    expect(esReferenciaAnterior("quiero eso en excel")).toBe(true);
+    expect(esReferenciaAnterior("Quiero descargar el reporte en Excel")).toBe(false);
+  });
+
   it("lo que no entiende no se exporta completo: pregunta", () => {
-    expect(interpretarPeriodo("el Excel de la semana pasada", HOY).tipo).toBe("no_entiendo");
-    expect(interpretarPeriodo("Excel de ayer", HOY).tipo).toBe("no_entiendo");
+    expect(interpretarPeriodo("excel de hace 3 meses", HOY).tipo).toBe("no_entiendo");
+    expect(interpretarPeriodo("excel del trimestre", HOY).tipo).toBe("no_entiendo");
     expect(interpretarPeriodo("Excel solo del rubro transporte", HOY).tipo).toBe("no_entiendo");
     expect(interpretarPeriodo("Excel desde 2026-01-01", HOY).tipo).toBe("no_entiendo");
   });
